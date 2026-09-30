@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment / secrets — never committed. `.env.example` (placeholder
+# values only) is checked in on purpose.
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Test / coverage output
+coverage/
+*.lcov
+
+# Editor / IDE / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+tmp/
+
+# Local Mongo data volume (docker-compose)
+mnu_mongo_data/
+
+# Local-disk menu-item image storage was replaced by Cloudinary (see
+# docs/PROGRESS.md) — ignored defensively so an uploaded image file can
+# never end up committed to the repo.
+uploads/
