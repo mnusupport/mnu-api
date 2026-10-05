@@ -12,6 +12,9 @@ out/
 */build/
 */.next/
 */out/
+/docs
+
+menu_trail.tsx
 
 # Turborepo / pnpm cache
 .turbo/
