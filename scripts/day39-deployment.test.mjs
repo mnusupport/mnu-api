@@ -1,19 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
-const main = read('src/main.ts');
-const db = read('src/database/database.module.ts');
-const health = read('src/app.controller.ts');
-const customer = read('src/customers/customer-auth.service.ts');
-const env = read('.env.example');
+const main = read('backend/src/main.ts');
+const db = read('backend/src/database/database.module.ts');
+const health = read('backend/src/app.controller.ts');
+const web = read('frontend/lib/api.ts');
+const env = read('backend/.env.example');
 
 test('production refuses local DB and still requires Cloudinary, without Twilio', () => {
   assert.match(main, /must not point to a local MongoDB in production/);
   assert.match(main, /CLOUDINARY_API_SECRET/);
   assert.doesNotMatch(main, /TWILIO_|OTP_/);
-  assert.match(customer, /Customer ordering no longer depends on|customer-provided/);
+  assert.equal(existsSync(new URL('../backend/src/customers/customer-auth.service.ts', import.meta.url)), false);
 });
 test('proxy trust, shutdown hooks and startup failure exit code', () => {
   assert.match(main, /trust proxy/);
@@ -30,6 +30,9 @@ test('mongo connection has timeouts, bounded retries and pool size', () => {
 test('/health returns 503 without leaking details when DB is down', () => {
   assert.match(health, /SERVICE_UNAVAILABLE/);
   assert.match(health, /database: 'disconnected'/);
+});
+test('web has no production localhost fallback', () => {
+  assert.match(web, /NODE_ENV === 'production'/);
 });
 test('customer ordering env template has no OTP/Twilio configuration', () => {
   assert.doesNotMatch(env, /TWILIO_|OTP_/);

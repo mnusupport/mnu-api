@@ -7,10 +7,10 @@ const root = path.resolve(new URL('..', import.meta.url).pathname);
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 const adminControllers = [
-  'src/menu/menu.controller.ts',
-  'src/orders/orders.controller.ts',
-  'src/restaurants/restaurants.controller.ts',
-  'src/tables/tables.controller.ts',
+  'backend/src/menu/menu.controller.ts',
+  'backend/src/orders/orders.controller.ts',
+  'backend/src/restaurants/restaurants.controller.ts',
+  'backend/src/tables/tables.controller.ts',
 ];
 
 test('restaurant admin controllers are protected by JwtAuthGuard', () => {
@@ -20,16 +20,16 @@ test('restaurant admin controllers are protected by JwtAuthGuard', () => {
   }
 });
 
-test('customer order access is bound to authenticated customer and restaurant', () => {
-  const source = read('src/orders/orders.service.ts');
-  assert.match(source, /find\(\{ restaurantId, customerId \}\)/);
-  assert.match(source, /findOne\(\{ _id: orderId, restaurantId, customerId \}\)/);
+test('public order access is anonymous but remains restaurant-scoped', () => {
+  const source = read('backend/src/orders/orders.service.ts');
+  assert.match(source, /getPublicOrderForRestaurant/);
+  assert.match(source, /findOne\(\{ _id: orderId, restaurantId \}/);
 });
 
 test('admin object lookups remain restaurant-scoped', () => {
-  const menu = read('src/menu/menu.service.ts');
-  const tables = read('src/tables/tables.service.ts');
-  const orders = read('src/orders/orders.service.ts');
+  const menu = read('backend/src/menu/menu.service.ts');
+  const tables = read('backend/src/tables/tables.service.ts');
+  const orders = read('backend/src/orders/orders.service.ts');
   assert.match(menu, /_id: itemId,\s*restaurantId/);
   assert.match(menu, /_id: categoryId,\s*restaurantId/);
   assert.match(tables, /findOne\(\{ _id: tableId, restaurantId \}\)/);
@@ -37,18 +37,19 @@ test('admin object lookups remain restaurant-scoped', () => {
 });
 
 test('destructive public table-session end route is absent', () => {
-  assert.doesNotMatch(read('src/table-sessions/table-sessions.controller.ts'), /@Patch\(['"]end['"]\)/);
+  assert.doesNotMatch(read('backend/src/table-sessions/table-sessions.controller.ts'), /@Patch\(['"]end['"]\)/);
+  assert.doesNotMatch(read('frontend/lib/api.ts'), /session\/end/);
 });
 
 test('production CORS is environment allowlisted', () => {
-  const source = read('src/main.ts');
+  const source = read('backend/src/main.ts');
   assert.match(source, /process\.env\.NODE_ENV === 'production'/);
   assert.match(source, /configuredCorsOrigins/);
   assert.doesNotMatch(source, /enableCors\(\s*\)/);
 });
 
 test('JWT secret is read from environment rather than hardcoded', () => {
-  const source = read('src/auth/jwt.util.ts');
+  const source = read('backend/src/auth/jwt.util.ts');
   assert.match(source, /process\.env\.JWT_SECRET/);
   assert.doesNotMatch(source, /JWT_SECRET\s*=\s*['"][^'"]+['"]/);
 });
