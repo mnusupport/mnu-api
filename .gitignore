@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+
+# Local-disk menu-item image storage was replaced by Cloudinary this
+# task (see docs/PROGRESS.md) — nothing should write here anymore, but
+# ignored defensively in case any local/manual testing recreates it, so
+# an uploaded image file can never end up committed to the repo.
+uploads/
