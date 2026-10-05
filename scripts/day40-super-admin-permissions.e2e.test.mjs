@@ -1,19 +1,19 @@
 // Day 40 — HTTP-level permission tests.
 //
 // Boots the REAL compiled controllers, services, guards, pipes, error filter
-// and the AuditInterceptor from dist/, with an in-memory fake standing
+// and the AuditInterceptor from backend/dist, with an in-memory fake standing
 // in for MongoDB (no mongod is available in CI/sandbox). This verifies real
 // authorization behaviour end to end. It does NOT verify MongoDB itself,
 // Cloudinary.
 //
-// Run:  (npm ci && npm run build) && node --test scripts/day40-super-admin-permissions.e2e.test.mjs
+// Run:  (cd backend && npm ci && npm run build) && node --test scripts/day40-super-admin-permissions.e2e.test.mjs
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const apiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const apiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../backend');
 const require = createRequire(path.join(apiDir, 'package.json'));
 process.env.JWT_SECRET = 'x'.repeat(48);
 process.env.NODE_ENV = 'test';
@@ -26,7 +26,7 @@ const { Types } = require('mongoose');
 const jwt = require('jsonwebtoken');
 const d = (p) => require(path.join(apiDir, 'dist', p));
 
-const { signToken, signCustomerToken } = d('auth/jwt.util');
+const { signToken } = d('auth/jwt.util');
 const { AuthorizationService } = d('common/authorization.service');
 const { SuperAdminGuard } = d('common/super-admin.guard');
 const { RequestSafetyPipe } = d('common/pipes/request-safety.pipe');
@@ -203,18 +203,13 @@ test('Restaurant Staff: can read, cannot manage', async () => {
   assert.equal((await call('PATCH', `/restaurants/${ids.A}/branding`, tok.staffA, { primaryColor: '#000000' })).status, 403);
 });
 
-test('Unauthenticated, garbage, expired and customer tokens are rejected', async () => {
+test('Unauthenticated, garbage and expired/invalid tokens are rejected', async () => {
   assert.equal((await call('GET', `/restaurants/${ids.A}/tables`)).status, 401);
   assert.equal((await call('GET', `/restaurants/${ids.A}/tables`, 'not.a.jwt')).status, 401);
   const expired = jwt.sign({ user_id: ids.super }, process.env.JWT_SECRET, { expiresIn: -10 });
   assert.equal((await call('GET', '/super-admin/dashboard', expired)).status, 401);
   const wrongSecret = jwt.sign({ user_id: ids.super }, 'y'.repeat(48));
   assert.equal((await call('GET', '/super-admin/dashboard', wrongSecret)).status, 401);
-  const customer = signCustomerToken(new Types.ObjectId().toString());
-  for (const u of ['/super-admin/dashboard', `/restaurants/${ids.A}/tables`]) {
-    const s = (await call('GET', u, customer)).status;
-    assert.ok(s === 401 || s === 403, `customer token on ${u} got ${s}`);
-  }
 });
 
 test('Malformed ids give 400/404, never 500', async () => {

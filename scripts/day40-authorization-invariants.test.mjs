@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
+const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../backend/src');
 const walk = (dir) => readdirSync(dir).flatMap((f) => { const p = path.join(dir, f); return statSync(p).isDirectory() ? walk(p) : [p]; });
 const files = walk(src).filter((f) => f.endsWith('.ts'));
 const read = (f) => readFileSync(f, 'utf8');

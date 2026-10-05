@@ -4256,3 +4256,447 @@ selection + persistent "Managing Restaurant" banner, audit logging, existence ch
 ### Known deployment/data note
 
 - New customer records require `restaurantId` and use a compound `(restaurantId, mobileNumber)` uniqueness rule. Existing legacy customer records created by the previous global OTP identity model are retained for historical order references; production deployment should review/migrate legacy customer records and old MongoDB indexes before relying on the new restaurant-scoped uniqueness constraint.
+
+
+## Part 1 — Customer Ordering Functionality, Takeaway QR & Ordering Errors (2026-09-30)
+
+- Customer QR checkout no longer requires OTP, Twilio Verify, SMS verification, or a customer-authentication guard. Name + phone are submitted directly to the public order endpoint.
+- The backend resolves/creates the restaurant-scoped customer from phone + restaurant and keeps phone explicitly unverified. Server-side menu ownership, availability, quantity, pricing, totals, restaurant and table-session validation remain enforced.
+- Customer name + phone are persisted in restaurant-scoped browser localStorage and prefilled on subsequent orders; the customer can edit them.
+- Added a restaurant-level Takeaway QR at `/takeaway/:restaurantId`; takeaway orders use the existing `OrderType.TAKEAWAY` enum and require no table or table session. Dine-in remains table/session constrained.
+- Admin Orders now distinguish DINE_IN vs TAKEAWAY and order-item image URLs are snapshotted from the menu item at order creation for historical display, with a no-photo fallback.
+- Group ordering continues to use the existing restaurant-scoped customer identity session created from name + phone; it no longer depends on OTP/Twilio.
+- Removed Staff from the restaurant Admin navigation because the current UI exposes only a read-only membership list and no implemented staff-management workflow is required by another active feature. Backend staff endpoints were preserved for compatibility.
+- Admin JWT persistence remains the existing single `/login` flow: the token is retained in browser localStorage until logout or its 7-day expiry; passwords are never stored.
+- Deployment documentation was updated so customer OTP/Twilio is no longer described as the active ordering flow.
+- Full dependency-backed build/typecheck/lint/live MongoDB/browser E2E must still be run in an environment with installed dependencies and configured external services; these checks are not claimed as passed from this source-only sandbox.
+
+## Part 1.1 — Customer Reorder & Orders Error Fix
+
+- Fixed returning-customer identity resolution so a repeat order reuses the existing customer record for the same restaurant + normalized phone instead of creating duplicates.
+- Added duplicate-key/race handling around customer creation so concurrent/repeat identity capture does not surface as an unexplained HTTP 500.
+- Customer order creation continues to create a fresh Order document with a fresh Mongo `_id` / order number; idempotency is only applied when the same checkout idempotency key is intentionally retried.
+- Customer order history/detail customer lookups are now explicitly scoped by both `customerId` and `restaurantId`.
+- Customer convenience tokens are now stored per restaurant (`mnu_customer_token:<restaurantId>`), preventing a token from one restaurant from being reused in another restaurant context.
+- The Orders screen no longer requests customer order history when no restaurant-scoped customer profile exists. It shows the existing empty/initial state instead.
+- When a saved name + phone profile exists but its convenience token is missing/stale, the browser silently re-identifies from that saved profile and retries history once; this is not a customer login or phone verification flow.
+- Customer identity forms reuse the locally saved restaurant-scoped name and phone so returning customers are not asked to re-enter them unnecessarily.
+- No broad UI redesign was performed and Part 2 was not started.
+
+### Part 1.1 validation
+
+- Focused Part 1.1 regression tests: **5/5 passed**.
+- Existing MnU security/auth/customer-ordering regression tests: **29/29 passed** in the combined static test run.
+- Full TypeScript typecheck, lint, production build, and database-backed/e2e execution could not be completed in this environment because the supplied project has no installed Node dependencies and the required pnpm package manager could not be downloaded from the npm registry (`EAI_AGAIN`).
+
+## Part 2A — Professional Admin Panel UI Upgrade (2026-10-01)
+- Upgraded the restaurant admin frontend visual system only; backend logic, authentication, database schemas, API behavior, customer ordering logic, and business rules were not changed.
+- Reworked the restaurant workspace shell: professional dark sidebar, semantic inline icons, clearer active navigation, restaurant context, user area, mobile drawer, responsive header, and restrained status/count treatments.
+- Redesigned Menu management as the primary admin workflow: real client-side search across item name/category/description, category filter chips with real counts, compact item table/list, image thumbnails with fallback, availability/featured states, compact actions, polished empty/loading states, and preserved existing CRUD handlers.
+- Refined Orders with service-oriented filtering, clear DINE-IN/TAKEAWAY badges, real item thumbnails, status hierarchy, totals, group-order indicator, and compact operational ticket cards. Existing order/status APIs are unchanged.
+- Refined Tables + QR management with explicit separation between restaurant-level Takeaway QR and individual Table QR codes, while preserving existing QR generation/download/print behavior.
+- Refined Customers into a professional data-list treatment and Analytics into a clearer dashboard-linked workspace state. Dashboard quick actions now use restrained semantic letter marks instead of emoji.
+- Added scoped admin design tokens/components in `apps/web/app/globals.css`, including responsive layouts, skeletons, status treatments, table/list primitives, panels, controls, and mobile behavior. Customer QR-menu styling remains scoped separately.
+
+### Files changed
+- `apps/web/app/globals.css`
+- `apps/web/app/restaurants/[restaurantId]/layout.tsx`
+- `apps/web/app/restaurants/[restaurantId]/menu/page.tsx`
+- `apps/web/app/restaurants/[restaurantId]/orders/page.tsx`
+- `apps/web/app/restaurants/[restaurantId]/tables/page.tsx`
+- `apps/web/app/restaurants/[restaurantId]/customers/page.tsx`
+- `apps/web/app/restaurants/[restaurantId]/analytics/page.tsx`
+- `apps/web/app/restaurants/[restaurantId]/dashboard/page.tsx`
+- `docs/PROGRESS.md`
+
+### Checks
+- Source-level TSX transpilation check: passed for all modified TSX files.
+- `npm run lint`: not runnable because dependencies are not installed (`next: not found`).
+- `npm run build`: not runnable for the same environment limitation (`next: not found`).
+- `npm ci --no-audit --no-fund` was attempted but timed out in the sandbox before dependencies could be installed.
+- Browser/manual visual verification was not available in this environment; responsive behavior was reviewed from the code/CSS breakpoints.
+- No backend files or API/business logic were modified for Part 2A.
+
+## Part 2B — Customer QR Menu & Group Order UI Upgrade (2026-10-01)
+
+- Upgraded the customer QR menu presentation without changing ordering APIs, authentication, customer identity, database schemas, or backend business rules.
+- Refined menu item cards into a clearer premium hierarchy: stronger food imagery, calmer typography, compact price/action controls, consistent fallbacks, and tighter mobile spacing.
+- Reworked `MenuTag` into a restrained semantic badge system using the existing MnU palette rather than emoji-heavy/random colors. Tags support clean wrapping and are capped to avoid covering core content.
+- Preserved real data only: Signature/Popular states still come from existing `isFeatured` and order-derived popular-item data. No fake Recommended/New analytics were introduced.
+- Updated category navigation to a lighter editorial tab treatment with a moving active underline, sticky mobile behavior, and touch-safe spacing.
+- Refined the customer Orders history UI with explicit DINE-IN/TAKEAWAY labels, text status badges, real order-item thumbnails, clearer totals, and a more useful card hierarchy. Existing order-history API/logic remains unchanged.
+- Reworked Group Order entry, join, and lobby screens so they share the QR Menu's warm/cream/terracotta visual language while keeping the existing group create/join/sync/place-order behavior unchanged.
+- Added a clearer Group Order information hierarchy: shared-table context, group code, members, My Items, Group Items, group total, Add Items, and one primary Place Group Order action.
+- Added accessible focus states to customer links/buttons/inputs and retained reduced-motion behavior from the existing motion system.
+- Added mobile-specific refinements for narrow 360–420px screens, including compact badges and group-code input sizing.
+
+### Files changed
+- `apps/web/app/globals.css`
+- `apps/web/app/menu/[restaurantId]/_components/MenuTag.tsx`
+- `apps/web/app/menu/[restaurantId]/_components/DishCards.tsx`
+- `apps/web/app/menu/[restaurantId]/_components/CategoryTabs.tsx`
+- `apps/web/app/menu/[restaurantId]/_components/MenuSection.tsx`
+- `apps/web/app/menu/[restaurantId]/page.tsx`
+- `apps/web/app/menu/[restaurantId]/group/_components/GroupShell.tsx`
+- `apps/web/app/menu/[restaurantId]/group/page.tsx`
+- `apps/web/app/menu/[restaurantId]/group/join/page.tsx`
+- `apps/web/app/menu/[restaurantId]/group/[groupCode]/page.tsx`
+- `apps/web/app/menu/[restaurantId]/orders/page.tsx`
+- `docs/PROGRESS.md`
+
+### Checks
+- TSX transpilation/syntax check for all modified customer TSX files: passed.
+- `tsc --noEmit`: attempted; could not complete because the supplied ZIP has no installed Node dependencies, so React/Next/Node type packages are unavailable. This produced environment/dependency errors rather than a clean project typecheck.
+- `npm run lint`: not runnable because dependencies are not installed (`next: not found`).
+- `npm run build`: not runnable for the same environment limitation (`next: not found`).
+- Backend/API files were not modified for Part 2B.
+- Browser/device visual verification was not available in this environment; code-level and narrow-screen CSS review were performed. No browser verification is claimed.
+
+## Part 1.2 — Customer Identity & Ordering Reliability Audit (2026-10-04)
+
+### Findings and fixes
+- Fixed Indian phone canonicalization: `9876543210`, `919876543210`, and `+919876543210` now normalize to the same `+91…` representation. Separators such as spaces, dots, parentheses, and hyphens are removed before normalization.
+- Added restaurant-scoped compatibility lookup for legacy Indian phone representations (`+91…`, `91…`, and 10-digit national form). Legacy stored values are not rewritten automatically because live duplicate/index state has not been inspected and automatic rewrites could collide with an existing unique index.
+- Existing customer names are updated when the same restaurant + phone submits a changed valid name; a name change does not create a new customer.
+- Preserved the existing security boundary: public order creation resolves identity from restaurant + submitted phone, customer order history/detail uses the authenticated customer token and restaurant scope, and order creation inserts a new Order document. Existing idempotency is only for retries using the same checkout key.
+- No UI redesign was performed. No backend API contract, database schema, or authentication architecture was changed.
+
+### Root-cause certainty / limits
+- The supplied archive has no configured live MongoDB connection or production database dump, and no backend stack trace/request log was supplied. Therefore the reported HTTP 500 and the exact MongoDB exception could not be reproduced in this environment. It would be inaccurate to claim a verified exception or claim the database index state was inspected.
+- The observed code-level defect is inconsistent normalization for the `91XXXXXXXXXX` form, plus no compatibility lookup for legacy phone representations. These can cause returning-customer lookup misses and are fixed here.
+- `CustomerSchema` declares a unique sparse compound index on `{ restaurantId, mobileNumber }`. A previously-created standalone unique index from an older deployment would not necessarily be removed just by changing the schema. Inspect live `customers` indexes before changing/dropping any index. Do not automatically drop production indexes or rewrite existing customer records without a backup and duplicate audit.
+- The same-session HTTP 500 is not conclusively attributed to one backend operation without a real response/stack trace. The current code can legitimately reject a second dine-in order with a 400 if the table has no active session; that is distinct from a 500. A live reproduction with the actual table/session and MongoDB is still required to identify any remaining infrastructure/data-specific failure.
+
+### Files changed
+- `apps/api/src/customers/customer-auth.service.ts`
+- `scripts/day44-customer-ordering-errors.test.mjs`
+- `docs/PROGRESS.md`
+
+### Checks
+- Focused customer identity/order regression source tests: **7/7 passed** (`node --test scripts/day44-customer-ordering-errors.test.mjs`).
+- Full existing source-test suite: **66 passed, 5 failed**. Failures include pre-existing assertions that expect older UI palette/text and unrelated source patterns; they are not runtime API tests. The suite is not fully green and these failures are recorded rather than hidden.
+- Lint, typecheck, and production build: **not run successfully** because this archive has no installed `node_modules`, and package installation was not available in the sandbox.
+- MongoDB-backed tests, browser/session matrix, live dine-in/takeaway/group order submissions, and database index audit: **not performed** because no configured database/service credentials or running app were available.
+
+### Remaining work before production sign-off
+- Run against a staging MongoDB and inspect `db.customers.getIndexes()`; verify the only phone uniqueness constraint is restaurant-scoped and identify any legacy standalone index.
+- Capture the exact HTTP 500 response and backend stack trace for second-order checkout, then run the full first/second/third order matrix for dine-in and takeaway, plus group ordering and history isolation.
+
+## Part 1.3 — Existing Customer Order Creation 400 Investigation (2026-10-04)
+
+### Findings and code changes
+- Traced the request path from `PublicOrdersController.create()` through `OrdersService.createOrder()` to `CustomerAuthService.identify()`. The controller passes the checkout name and phone to the existing identity service; order creation receives the resolved customer ID and creates a separate Order document. No frontend payload change was needed from source inspection.
+- The reported message was thrown only after customer creation returned MongoDB duplicate-key (`E11000`) errors and the service failed to find a matching customer using its narrower fallback lookup. That explains the immediate code path behind the generic 400, but the supplied project has no live database/index listing or backend stack trace, so the underlying conflicting index/key cannot yet be proven.
+- Unified the post-duplicate lookup with the same restaurant-scoped, legacy-compatible phone lookup used before creation. This supports canonical `+91…` and legacy `91…` / national-number representations consistently, including the concurrent-create recovery path.
+- Removed the generic `Could not create the customer record` conversion for unresolved duplicate-key errors. The service now logs the operation, restaurant ID, masked phone suffix, duplicate key pattern/index details where available, and stack; it then preserves the original MongoDB exception so the actual conflict is visible to backend diagnostics. No full phone number, token, password, or OTP is logged.
+- If MongoDB reports a phone-key duplicate but no matching customer exists in this restaurant, the service logs and surfaces that exception immediately instead of retrying a conflict that cannot be resolved by another insert. This is consistent with the need to audit a possible obsolete global unique index without dropping or weakening any index blindly.
+- Existing customer names are preserved. A checkout name only fills a missing/blank name on a legacy customer; it does not silently overwrite an existing name. The customer session token is still signed for the resolved customer and restaurant.
+- Customer identity remains restaurant-scoped. The frontend-supplied customer ID is not used to authorize or choose the customer. No UI, API payload, schema, or database index was changed; OTP was not reintroduced.
+
+### Files changed
+- `apps/api/src/customers/customer-auth.service.ts`
+- `scripts/day44-customer-ordering-errors.test.mjs`
+- `scripts/day42-customer-ordering.test.mjs` (updated a source assertion to match the current legacy-compatible scoped lookup)
+- `docs/PROGRESS.md`
+
+### Tests and validation
+- Focused customer identity/order source regression tests: **9/9 passed** (`node --test scripts/day44-customer-ordering-errors.test.mjs`).
+- Full source suite: **68 passed, 5 failed** after updating the stale Day 42 lookup assertion. The remaining failures are outside this fix: two HTTP/e2e test files cannot start because compiled API output/dependencies are unavailable, and three unrelated static assertions are stale against existing deployment/admin/menu code. See the command output for exact test names.
+- No TypeScript check, API build, frontend build, MongoDB-backed test, browser checkout, or real concurrent order test was completed: this archive does not contain `node_modules`, a running app, database credentials, or a database dump.
+- No live customer index was inspected and no migration/index modification was made.
+
+### Required runtime follow-up before declaring the root cause resolved
+1. Reproduce checkout against the same database and capture the new server-side `E11000` key pattern/index name and stack.
+2. Run `db.customers.getIndexes()` and inspect for a legacy standalone unique index on `mobileNumber` (or another conflicting key). Audit duplicates before any index change; do not drop an index blindly.
+3. Run existing-customer order/reorder, 3 separate orders, phone-format variants, missing-name customer, same phone across two restaurants, simultaneous new-customer requests, takeaway, group order, and history-isolation tests against staging.
+4. Verify each successful request creates one new Order and reuses the same restaurant-scoped Customer record.
+
+**Status:** Code-level customer resolution and diagnostics are improved, but the definition of done is **not yet verified** until the real MongoDB duplicate-key evidence and checkout matrix are captured. This report does not claim the database-specific root cause is conclusively identified.
+
+
+## Part 1.4 — Customer Identification Before Order Creation (2026-10-04)
+
+### Objective and architecture change
+
+Separated customer identification/registration from order creation as requested in the customer ordering architecture brief. The QR checkout path is now intended to be:
+
+`Cart → Customer identification/session → Read-only customer summary + order review → Authenticated order creation → Confirmation`
+
+The order endpoint no longer receives customer name/phone and no longer calls the customer find-or-create service. It requires a customer session, obtains the customer ID from the signed token guard, checks that the customer record belongs to the requested restaurant, then validates the cart/table and recomputes prices and totals from database menu items.
+
+### Changed files
+
+- `apps/api/src/customers/customer-auth.service.ts` — added a returning-customer lookup that normalizes the phone, searches only within the requested restaurant, and creates a session only when a matching record exists. Existing registration/identify behavior remains available for first-time registration and avoids creating another record when one already exists.
+- `apps/api/src/customers/customer-auth.controller.ts` — added `POST /public/customer-auth/returning`.
+- `apps/api/src/orders/public-orders.controller.ts` — order creation now requires `CustomerAuthGuard` and passes the authenticated customer ID to the service; customer name/phone are no longer accepted in the order payload.
+- `apps/api/src/orders/orders.service.ts` — removed inline customer identification from `createOrder`; verifies `{ _id: customerId, restaurantId }` before creating the order. Server-side menu availability/pricing and table/takeaway validation remain in the existing flow.
+- `apps/web/lib/api.ts` — order creation now uses the restaurant-scoped customer token; added the returning-customer lookup client call.
+- `apps/web/app/menu/[restaurantId]/identify/page.tsx` — added the customer identification step: valid-session welcome back, returning customer phone lookup, not-found-to-registration path, and new customer registration.
+- `apps/web/app/menu/[restaurantId]/cart/page.tsx` — checkout CTA now goes through customer identification before final review.
+- `apps/web/app/menu/[restaurantId]/review/page.tsx` — removed editable name/phone fields; displays the identified customer as a read-only summary and submits orders using the customer session.
+- `scripts/day39-deployment.test.mjs` — updated customer-ordering assertions for the new returning-lookup endpoint.
+- `scripts/day42-customer-ordering.test.mjs` — updated assertions for the new session-first flow and refreshed a stale menu-tag color assertion to match the existing UI source.
+- `scripts/day43-functionality.test.mjs` — updated assertions for session-protected order creation, profile persistence in the identification step, and the new checkout route.
+- `scripts/day44-customer-ordering-errors.test.mjs` — added source-level regression checks for authenticated order creation and customer identification states.
+- `docs/DEPLOYMENT.md` — updated the documented customer checkout sequence.
+
+### Database and existing data
+
+- No customer schema change was made.
+- No MongoDB index was changed or dropped.
+- No data migration was run.
+- Existing customers are resolved using the existing canonical/legacy phone candidates within the restaurant. The actual deployed MongoDB indexes still need to be inspected before concluding whether a legacy unique index contributed to the earlier 400/500 reports.
+
+### Validation performed
+
+- Focused customer/deployment/functionality source tests: `node --test scripts/day42-customer-ordering.test.mjs scripts/day44-customer-ordering-errors.test.mjs scripts/day43-functionality.test.mjs scripts/day39-deployment.test.mjs` — **27 passed, 0 failed**.
+- Full source suite: `node --test scripts/*.test.mjs` — **72 passed, 3 failed**. The remaining failures are two standalone E2E test scripts (`day40-super-admin-permissions.e2e.test.mjs`, `day41-single-login.e2e.test.mjs`) and one unrelated restaurant-management source assertion.
+- TypeScript check attempted for both apps (`tsc -p apps/web/tsconfig.json --noEmit` and `tsc -p apps/api/tsconfig.json --noEmit`) — **blocked by missing dependencies/types** (`react`, `next`, `@nestjs/common`, `mongoose`, etc. are not installed in this extracted workspace). API build and frontend build therefore could not be completed.
+
+### Remaining verification
+
+Run the app with its configured dependencies and MongoDB, then test: new customer registration; returning customer lookup and missing-account registration; a valid session bypassing identification; three orders using one customer; same phone at a second restaurant; invalid/cross-restaurant token rejection; takeaway without a table; group order; and customer history with no previous orders. Inspect `db.customers.getIndexes()` before making any index/migration decision.
+
+## Part 1.5 — Completely Remove Customer Authentication From Public Ordering (2026-10-05)
+
+### Objective
+
+Removed the customer authentication/identity requirement from the public QR ordering flow. Public customers can now place orders without providing a name, phone number, OTP, customer login/session, registration, or Customer record.
+
+The intended solo flow is now:
+
+`QR Menu → Select Items → Cart → Review Order → Place Order → Order Created`
+
+### Frontend changes
+
+- Removed the public customer identification/registration route and its supporting customer-auth UI components.
+- Removed customer token/profile browser storage used by public ordering.
+- Cart now routes directly to `/review`.
+- Review no longer loads or validates a customer session, redirects to identity, asks for name/phone, or sends customer information. The Place Order action calls the anonymous public order endpoint directly.
+- Customer Home no longer loads customer profile/name or renders the customer-name prompt.
+- Customer Orders no longer attempts customer identification. It shows an identity-free empty state because there is no reliable customer identity from which to retrieve personal history.
+- Order tracking/detail is now public and restaurant-scoped by `{ restaurantId, orderId }`; it does not display customer identity.
+
+### Backend changes
+
+- Removed `CustomerAuthGuard`, customer session decorator, customer-auth controller/service, and the public customer-auth module wiring.
+- Removed customer-token signing/verification from `auth/jwt.util.ts`.
+- `POST /public/restaurants/:restaurantId/orders` is now anonymous and remains rate-limited.
+- `OrdersService.createOrder()` no longer finds/creates/validates a Customer and never requires `customerId` for public order creation.
+- Removed the old customer-creation failure path from public ordering, including the possibility of exposing `Could not create the customer record. Please try again.` during normal anonymous checkout.
+- Order idempotency now uses `{ restaurantId, idempotencyKey }` for the anonymous public flow. Existing server-side duplicate-key handling remains.
+- Public order validation is unchanged in principle: restaurant existence, order type, table ownership/active table session for DINE_IN, restaurant-scoped menu items, item availability, integer quantities, server-side prices, line totals, subtotal, total, and order creation are all validated/computed on the server.
+
+### Order model / database
+
+- `Order.customerId` remains **optional** for compatibility with historical/admin-managed orders. It is not populated by new anonymous public orders.
+- Existing Customer schema/collection was **not dropped** because the admin customer-management/history surface still reads legacy customer records associated with historical orders.
+- No Customer collection or index was dropped.
+- No destructive database migration was run.
+- Group Order records were changed to use anonymous `participantId` values instead of Customer IDs for new group participation. Legacy group fields remain optional for compatibility; new group orders do not create or require Customer records.
+
+### Group Order
+
+- Removed CustomerAuthGuard from Group Order routes.
+- Group members are identified only by a random browser `participantId` stored locally per restaurant. This is not a customer account, phone number, OTP, login, or server customer session.
+- Group create/join/read/sync/place-order routes no longer require a Customer record.
+- Group item prices and availability are still resolved from the restaurant's MenuItem records server-side.
+- DINE_IN table and active table-session validation remains enforced for Group Orders.
+
+### Security preserved
+
+Removing customer authentication did **not** remove order validation. The server still verifies:
+
+- restaurant exists
+- DINE_IN table belongs to the requested restaurant
+- DINE_IN table has an active table session
+- TAKEAWAY does not receive a table
+- every menu item belongs to the restaurant
+- every menu item is available
+- quantities are positive integers
+- prices come from MongoDB menu data
+- line totals/subtotal/total are calculated server-side
+- order type is valid
+- public order/detail access remains restaurant-scoped
+- public order creation remains rate-limited
+
+The browser cannot supply a trusted price, total, or customer ID to authorize an order.
+
+### Files changed
+
+- `apps/api/src/orders/public-orders.controller.ts`
+- `apps/api/src/orders/orders.service.ts`
+- `apps/api/src/orders/schemas/order.schema.ts`
+- `apps/api/src/orders/orders.module.ts`
+- `apps/api/src/group-orders/group-orders.controller.ts`
+- `apps/api/src/group-orders/group-orders.service.ts`
+- `apps/api/src/group-orders/group-orders.module.ts`
+- `apps/api/src/group-orders/schemas/group-order.schema.ts`
+- `apps/api/src/auth/jwt.util.ts`
+- `apps/api/src/app.module.ts`
+- `apps/api/src/common/guards/rate-limit.guard.ts`
+- `apps/api/src/main.ts`
+- Removed `apps/api/src/customers/customer-auth.controller.ts`
+- Removed `apps/api/src/customers/customer-auth.service.ts`
+- Removed `apps/api/src/customers/customer-auth.guard.ts`
+- Removed `apps/api/src/customers/current-customer.decorator.ts`
+- Removed `apps/api/src/customers/customers.module.ts`
+- `apps/web/lib/api.ts`
+- Added `apps/web/lib/groupParticipant.ts`
+- Removed `apps/web/lib/customerAuth.ts`
+- Removed `apps/web/lib/customerProfile.ts`
+- `apps/web/app/menu/[restaurantId]/cart/page.tsx`
+- `apps/web/app/menu/[restaurantId]/review/page.tsx`
+- `apps/web/app/menu/[restaurantId]/home/page.tsx`
+- `apps/web/app/menu/[restaurantId]/home/_components/HomeHero.tsx`
+- `apps/web/app/menu/[restaurantId]/orders/page.tsx`
+- `apps/web/app/menu/[restaurantId]/orders/[orderId]/page.tsx`
+- `apps/web/app/menu/[restaurantId]/group/page.tsx`
+- `apps/web/app/menu/[restaurantId]/group/join/page.tsx`
+- `apps/web/app/menu/[restaurantId]/group/[groupCode]/page.tsx`
+- Removed `apps/web/app/menu/[restaurantId]/identify/page.tsx`
+- Removed `apps/web/app/menu/[restaurantId]/_components/CustomerIdentityPanel.tsx`
+- Removed `apps/web/app/menu/[restaurantId]/_components/CustomerNamePrompt.tsx`
+- `scripts/day36-api-hardening.test.mjs`
+- `scripts/day38-production-readiness.test.mjs`
+- `scripts/day39-deployment.test.mjs`
+- `scripts/day40-super-admin-permissions.e2e.test.mjs`
+- `scripts/day42-customer-ordering.test.mjs`
+- `scripts/day43-functionality.test.mjs`
+- `scripts/day44-customer-ordering-errors.test.mjs`
+- `scripts/security-audit.test.mjs`
+- `docs/PROGRESS.md`
+
+### Validation performed
+
+- Anonymous-ordering focused source tests: **45/45 passed** across the updated Day 36/38/39/42/43/44 checks plus the security audit.
+- Full static/source suite: **69 passed, 3 failed**. Two failures are E2E scripts that cannot start because this extracted workspace has no installed API dependencies/compiled runtime (`reflect-metadata` is missing). One remaining static failure is unrelated restaurant-management behavior. The anonymous-ordering-focused checks are green.
+- API `tsc --noEmit`: attempted, but blocked by missing project dependencies/types (`@nestjs/*`, `mongoose`, `express`, `@types/node`, etc.). No clean project-wide typecheck can be claimed.
+- Web `tsc --noEmit`: attempted, but blocked by missing React/Next dependencies/types. The earlier JSX syntax error introduced during editing was corrected; the remaining reported errors are dependency/type-environment errors.
+- `npm/pnpm lint`: not runnable because dependencies are not installed.
+- Production builds: not runnable because dependencies are not installed.
+- Live MongoDB/application/browser verification: **not performed**. No live database credentials, running API, browser session, or database dump is available in this workspace.
+
+### Definition-of-done status
+
+The source architecture now permits public QR orders without customer identity and the old customer-creation error path is removed. Runtime confirmation is still required for the full matrix: anonymous DINE_IN, anonymous TAKEAWAY, anonymous repeat order, Group Order, refresh at Cart/Review, Orders empty state, invalid/wrong-restaurant items, and server-calculated totals.
+
+## Part 1.6 — QR Menu Ordering With Name Only, No Phone Number (2026-10-05)
+
+### Request
+Customers must be able to order directly from the QR menu with **only their name**
+and **without a phone number**. Fix every error found, change only what relates to
+this update, and do not create duplicate database collections/names.
+
+### What changed
+- Checkout (`/menu/[restaurantId]/review`) now has a required **Your name** field.
+  It is validated in the browser (2-80 characters; letters, spaces, apostrophes,
+  dots, hyphens) and again on the server. No phone/mobile field exists anywhere in
+  the customer ordering flow.
+- `POST /public/restaurants/:restaurantId/orders` accepts `customerName`.
+  `OrdersService.createOrder` normalizes it (trim, collapse spaces), rejects a
+  missing/invalid name with a clear 400 message, and stores it on the order. It still
+  creates, finds or requires **no Customer record**, so the old customer-creation
+  error path stays removed. Prices/totals remain server-calculated.
+- **No new database collection or duplicate name was added.** The name is stored as a
+  new optional `customerName` field on the existing `Order` schema/collection. Existing
+  orders without it remain valid. The existing `Customer` schema, its `mobileNumber`
+  field, and all indexes are untouched (still used only for legacy/admin records).
+- Admin order detail shows `Customer · <name>` for QR orders that have no legacy
+  Customer record; `AdminOrderRecord` gained optional `customerName`.
+- Group ordering was intentionally **not** changed.
+
+### Errors found and fixed
+- `apps/web/app/menu/[restaurantId]/home/page.tsx` was an **empty (0-byte) file** in the
+  uploaded archive, which broke `next build` ("not a module") and the customer Home
+  route. Rebuilt it from the existing Home components, the same public menu/popular
+  APIs and the same cart hook; no new endpoints.
+- `group/_components/GroupShell.tsx`: `CustomerTheme` was rendered without its required
+  `restaurantId` (TS2741). Now read via `useParams`.
+- `app/takeaway/[restaurantId]/page.tsx`: read `menu.restaurant.name`, which does not
+  exist on `PublicMenu` (TS2339, would crash at runtime). Now `menu.restaurantName`.
+
+### Files changed
+- `apps/api/src/orders/public-orders.controller.ts`
+- `apps/api/src/orders/orders.service.ts`
+- `apps/api/src/orders/schemas/order.schema.ts`
+- `apps/web/lib/api.ts`
+- `apps/web/app/menu/[restaurantId]/review/page.tsx`
+- `apps/web/app/menu/[restaurantId]/home/page.tsx`
+- `apps/web/app/menu/[restaurantId]/group/_components/GroupShell.tsx`
+- `apps/web/app/takeaway/[restaurantId]/page.tsx`
+- `apps/web/app/restaurants/[restaurantId]/orders/[orderId]/page.tsx`
+- `scripts/day44-customer-ordering-errors.test.mjs`
+- `docs/PROGRESS.md`
+
+### Validation performed
+- API `tsc --noEmit`: clean (dependencies installed).
+- Web `tsc --noEmit`: clean (was 2 errors + the empty home page).
+- Web `next build` (with `NEXT_PUBLIC_API_URL` set, as the production guard requires): succeeds, all routes generated.
+- Source tests: all pass except `day41-single-login` "restaurant management pages use the shared selected-restaurant context", a pre-existing failure unrelated to ordering (not touched).
+- Not performed: live MongoDB/browser run and the two E2E scripts (need a running database).
+
+## Part 1.7 — Optional Customer Recognition for QR Ordering (2026-10-06)
+
+### Architecture
+Customer recognition is an **optional convenience layer**, separate from order creation:
+
+```
+recognition (optional) -> display name -> sent as the normal `customerName` -> POST /public/restaurants/:id/orders (unchanged)
+```
+
+- `OrdersService.createOrder()`, `PublicOrdersController`, `OrdersModule`, Group Order, Takeaway, tables/sessions, admin and auth are **byte-identical** to the Part 1.6 archive. No OTP, Twilio, password, customer login, CustomerAuthGuard, customer session or `customerId` was reintroduced.
+- Browser identity: a random 256-bit opaque token (`randomBytes(32)`, base64url) stored in `localStorage` under `mnu_customer_identity:<restaurantId>`. It contains no name, phone or customer id. No IP, fingerprinting or other tracking.
+- Server: only the SHA-256 **hash** of the token is stored, inside the existing `Customer` document (`recognitionTokens`, max 10 newest browsers). Lookup is `{ restaurantId, recognitionTokens.tokenHash }`, so a token can only ever recognize a customer of the restaurant it was issued for. A deleted customer simply stops matching. `select: false` keeps hashes out of every existing query.
+- Endpoints (`POST /public/restaurants/:restaurantId/customer-recognition/...`): `resolve` (token), `returning` (phone only), `register` (name + phone), `forget` (token). Always HTTP 200 with a `status` (`recognized | unrecognized | not_found | invalid | cleared | unavailable`); any database problem becomes `unavailable`, never a 500. `returning`/`register` are rate limited (10/min/IP), `resolve` 60/min, `forget` 30/min.
+- Phone handling reuses the project's canonical normalization (`+91` handling and legacy `91…`/10-digit candidates), moved unchanged from the deleted `customer-auth.service.ts` into `customers/customer-contact.util.ts`; it is the only implementation. The browser only ever receives a masked phone (`98XXXXXX10`).
+
+### Cases (review page `/menu/:id/review`)
+- **New customer + new browser:** "Have you ordered here before?" -> No -> name + phone -> customer created or reused (never duplicated) -> token saved -> "Welcome back / Ordering as" -> review -> order.
+- **Existing customer + new browser:** Yes -> phone only -> customer found -> *this browser* gets its own token -> welcome -> review. Phone not found -> registration (typed number carried over).
+- **Existing customer + same browser:** token resolved automatically; no questions, no phone/name field; review shows `Customer / Ruchit / 98XXXXXX10 / ✓ Recognized customer`.
+- **Change customer:** clears only this restaurant's token (and revokes it server-side); cart, table, admin login, other restaurants, the Customer and past orders are untouched.
+- **Fallback (hard requirement):** every identification step has "Continue with just my name". Resolve failure/timeout (6 s) -> plain Part 1.6 name field. Place order is available in `recognized` and `nameOnly` states, and the order request is identical in both.
+
+### Files changed
+- API: `customers/customer-contact.util.ts` (new), `customers/customer-recognition.service.ts` (new), `customers/customer-recognition.controller.ts` (new), `customers/customer-recognition.module.ts` (new), `customers/schemas/customer.schema.ts`, `app.module.ts`
+- Web: `lib/customerRecognition.ts` (new), `lib/useCustomerRecognition.ts` (new), `lib/api.ts`, `app/menu/[restaurantId]/_components/CustomerIdentifier.tsx` (new), `app/menu/[restaurantId]/review/page.tsx`
+- Tests: `scripts/customer-recognition.test.mjs` (new), `scripts/recognition-harness/*` (new, test-only), `scripts/day44-customer-ordering-errors.test.mjs` (one location-based assertion updated: the `customer-name` input moved from `review/page.tsx` into `CustomerIdentifier.tsx`; all order-path assertions untouched)
+- Docs: this entry
+
+### Database
+- Collections changed: **none** (no new collection; existing `Customer` reused).
+- Schema changed: `Customer` gained optional `recognitionTokens: { tokenHash, createdAt }[]` (additive, `select: false`, no default).
+- Indexes changed: **one added**, non-unique + partial: `{ restaurantId: 1, 'recognitionTokens.tokenHash': 1 }`. Existing indexes (unique sparse `{ restaurantId, mobileNumber }`, unique `customerCode`, unique sparse `email`) are untouched; nothing dropped.
+- Migration required: **none**. Verify the new index is built in production (depends on `autoIndex`), and still run `db.customers.getIndexes()` for the legacy-index audit left open in Part 1.3.
+
+### Validation performed
+- `node --test scripts/*.test.mjs`: **92 passed, 3 failed** (baseline before this work: 70 passed, 3 failed). The same 3 failures as before: `day40`/`day41` E2E scripts (need a running API + MongoDB) and the unrelated "restaurant management pages…" assertion.
+- New `customer-recognition.test.mjs`: 22/22. Static architecture checks plus behavior tests that compile the REAL service with `tsc` (project flags: `strictNullChecks`, `noImplicitAny`) against minimal NestJS/Mongoose stand-ins and an in-memory Customer model enforcing the unique indexes with failure injection. Covers matrix A–E, G–K, plus phone variants, legacy phone/nameless customers, concurrency (6 parallel registrations -> 1 customer), customerCode collision retry, unresolvable legacy-index conflict -> `unavailable`, token cap, input validation, and log hygiene (no raw phone/token/hash in logs).
+- Web: new/changed files type-check clean under `strict` against typed React/Next stand-ins.
+
+### NOT verified (environment limits)
+- Real `pnpm install`, API/Web `tsc`, API/Web `build`: **not run** (package registry blocked, no `node_modules`). Only the stand-in checks above.
+- Real MongoDB behavior (unique/partial index build, `$push/$slice`, `select:false`), a live API, and any browser run: **not performed**. Matrix F (cleared storage), L (takeaway), M (dine-in), N (group order) were not exercised end to end; for L/M/N the evidence is that all order, group, takeaway, table and session code is byte-identical to the previous archive.
+
+### Known limitations / decisions
+- **Phone-only recognition is not authentication.** Anyone who knows a customer's phone can be recognized as that customer on their own device and sees that customer's name and masked phone. Mitigations: restaurant scope, tight per-IP rate limit (in-memory, per API instance), no history exposed, no order linkage. Name is first-writer-wins (an existing name is never overwritten).
+- Customer **order history was deliberately not wired to recognition** (Orders page unchanged): phone-only recognition is too weak to protect history, and orders are not linked to `customerId`. Consequently the admin customer list (driven by `Order.customerId`) does not show recognition-only customers. Linking orders to customers needs a separate decision.
+- A recognized legacy customer with no valid stored name sees a name field inside the Customer card (the order still requires a name); no phone field is ever shown.
+- Pre-existing, untouched: the unique sparse `{ restaurantId, mobileNumber }` index still indexes documents that have `restaurantId` but no `mobileNumber`, so two legacy phone-less customers in one restaurant would collide with each other. Recognition always sets `mobileNumber`.
+
+## Part 1.8 — Backend and frontend separated (2026-10-06)
+
+Structure change only; **no application logic was changed**.
+
+```
+apps/api  ->  backend/    (+ docker-compose.yml for local MongoDB, + README.md)
+apps/web  ->  frontend/
+docs/, scripts/, menu_tail.tsx stay at the repository root
+```
+
+- Removed the root workspace tooling that tied the two together: `package.json`, `pnpm-workspace.yaml`, `turbo.json`, `pnpm-lock.yaml`. Each project already had its own `package-lock.json` and is installed/built/deployed on its own with `npm ci`. (`pnpm-lock.yaml` spanned both apps and cannot be split without pnpm; run `pnpm install` inside a project if you want a pnpm lock.) Removed the stale build artifact `frontend/tsconfig.tsbuildinfo`.
+- There were no shared packages and no cross-imports between the apps (verified: no `workspace:` dependencies, no source reaching outside its own app); they communicate only over HTTP via `NEXT_PUBLIC_API_URL` / `CORS_ORIGINS`.
+- Updated paths in: `scripts/*.mjs` (`apps/api`->`backend`, `apps/web`->`frontend`), `docs/DEPLOYMENT.md`, `docs/DATABASE.md` (operational commands now use `npm`, not `pnpm --filter`), root `.gitignore`, `backend/.env.example`, `frontend/README.md`, and two strings in backend source (a comment in `common/cloudinary.ts` and the startup warning in `main.ts` that names where `.env` lives).
+- **Reading older entries in this file:** they use the old paths. `apps/api` = `backend`, `apps/web` = `frontend`. They were intentionally left as written.
+- Not changed: any `.ts`/`.tsx` logic, API routes, database, tests' assertions (paths only).

@@ -38,16 +38,73 @@ test('no obsolete separate-Super-Admin-login references remain in source or docs
   }
 });
 
+test('the separate login/registration pages do not exist', () => {
+  assert.ok(!exists('frontend/app/super-admin/login'));
+  assert.ok(!exists('frontend/app/super-admin/register'));
+  assert.ok(exists('frontend/app/login/page.tsx'));
+});
+
 test('backend exposes one login endpoint and no Super Admin login/registration route', () => {
-  const ctrl = read('src/auth/auth.controller.ts');
+  const ctrl = read('backend/src/auth/auth.controller.ts');
   assert.equal((ctrl.match(/@Post\('login'\)/g) || []).length, 1);
   assert.doesNotMatch(ctrl, /@Post\('super-admin/);
-  const svc = read('src/auth/auth.service.ts');
+  const svc = read('backend/src/auth/auth.service.ts');
   assert.doesNotMatch(svc, /superAdminLogin/);
   // authenticate() takes credentials only: no role/portal parameter from the client
   assert.match(svc, /private async authenticate\(input: LoginInput\)/);
   // registration always creates a normal user and never reads a role from the request
   assert.match(svc, /platformRole: PlatformRole\.USER/);
+});
+
+test('/login has no role selector or Super Admin option and shares the landing logic', () => {
+  const login = read('frontend/app/login/page.tsx').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(login, /<select|role=|Super Admin/i);
+  assert.match(login, /resolveLanding\(/);
+  assert.match(login, /authApi\.login\(/);
+  assert.match(read('frontend/lib/api.ts'), /'\/auth\/login'/);
+  assert.doesNotMatch(read('frontend/lib/api.ts'), /super-admin\/login/);
+});
+
+test('role-based landing: SUPER_ADMIN -> platform panel, others -> their restaurant; one shared helper', () => {
+  const helper = read('frontend/lib/roleRouting.ts');
+  assert.match(helper, /SUPER_ADMIN[\s\S]*\/super-admin\/dashboard/);
+  assert.match(helper, /\/restaurants\/\$\{memberships\[0\]\.restaurant_id\}\/dashboard/);
+  assert.match(read('frontend/app/dashboard/page.tsx'), /resolveLanding\(/);
+  assert.match(read('frontend/app/super-admin/layout.tsx'), /resolveLanding\(/);
+});
+
+test('restaurant management pages use the shared selected-restaurant context, not membership-only gating', () => {
+  const layout = read('frontend/app/restaurants/[restaurantId]/layout.tsx');
+  assert.match(layout, /user\?\.platformRole === 'SUPER_ADMIN'/);
+  assert.match(layout, /Managing Restaurant/);
+
+  for (const page of ['menu', 'tables']) {
+    const source = read(`frontend/app/restaurants/[restaurantId]/${page}/page.tsx`);
+    assert.match(source, /useRestaurantContext\(\)/, `${page} page must consume the shared restaurant context`);
+    assert.doesNotMatch(source, /me\.memberships\.find/, `${page} page must not require a restaurant membership for SUPER_ADMIN`);
+    assert.doesNotMatch(source, /You don't have access to this restaurant\./, `${page} page must not reintroduce the membership-only access error`);
+  }
+});
+
+test('Super Admin routes are guarded in the UI and unauthenticated users go to the single /login', () => {
+  const layout = read('frontend/app/super-admin/layout.tsx');
+  assert.match(layout, /platformRole !== 'SUPER_ADMIN'/);
+  assert.match(layout, /router\.replace\('\/login'\)/);
+  assert.doesNotMatch(layout, /super-admin\/login/);
+  // navigation of the platform panel is separate from the restaurant sidebar
+  assert.doesNotMatch(read('frontend/app/restaurants/[restaurantId]/layout.tsx'), /POS Partners|Platform Analytics/);
+});
+
+test('logout from either panel returns to the single /login', () => {
+  assert.match(read('frontend/app/restaurants/[restaurantId]/layout.tsx'), /router\.push\('\/login'\)/);
+  const sa = read('frontend/app/super-admin/layout.tsx');
+  assert.match(sa, /removeItem\('mnu_token'\)[\s\S]{0,80}router\.replace\('\/login'\)/);
+});
+
+test('landing page offers a single sign-in entry', () => {
+  const home = read('frontend/app/page.tsx');
+  assert.equal((home.match(/href="\/login"/g) || []).length, 1);
+  assert.doesNotMatch(home, /Super Admin/);
 });
 
 test('no hard-coded Super Admin credentials in tracked source/config', () => {

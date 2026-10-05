@@ -2,18 +2,18 @@
 //
 // Boots the REAL compiled AuthController/AuthService (real bcrypt, real JWT),
 // JwtAuthGuard, SuperAdminGuard, AuthorizationService, platform + restaurant
-// controllers, request-safety pipe and error filter from dist/ over
+// controllers, request-safety pipe and error filter from backend/dist over
 // real HTTP. Only the Mongoose models are in-memory fakes (no mongod here), so
 // this proves authentication/authorization BEHAVIOUR, not MongoDB itself.
 //
-// Run:  (npm run build) && node --test scripts/day41-single-login.e2e.test.mjs
+// Run:  (cd backend && npm run build) && node --test scripts/day41-single-login.e2e.test.mjs
 import test, { before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const apiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const apiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../backend');
 const require = createRequire(path.join(apiDir, 'package.json'));
 process.env.JWT_SECRET = 'y'.repeat(48);
 process.env.NODE_ENV = 'test';

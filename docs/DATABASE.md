@@ -8,7 +8,7 @@ Prisma" below for what changed and why.
 
 ## Connection
 
-`apps/api/src/database/database.module.ts` is a `@Global()` module that:
+`backend/src/database/database.module.ts` is a `@Global()` module that:
 
 1. Opens the MongoDB connection with `MongooseModule.forRootAsync()`,
    reading the connection string from `DATABASE_URL` (via `ConfigService`,
@@ -17,13 +17,13 @@ Prisma" below for what changed and why.
    so any module can `@InjectModel(...)` them without re-declaring the
    schema registration.
 
-`DATABASE_URL` format (see `apps/api/.env.example`):
+`DATABASE_URL` format (see `backend/.env.example`):
 ```
 # Local:  mongodb://localhost:27017/mnu_dev
 # Atlas:  mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/mnu_dev
 ```
 
-`GET /health` (`apps/api/src/app.controller.ts`) round-trips
+`GET /health` (`backend/src/app.controller.ts`) round-trips
 `connection.db.admin().ping()` to prove the connection is alive.
 
 ## Models
@@ -43,7 +43,7 @@ of Prisma models. Mongo/Mongoose provide `_id` (`ObjectId`) automatically,
 so — unlike `schema.prisma` — none of the schemas below declare an
 explicit `id` field.
 
-### User (`apps/api/src/users/schemas/user.schema.ts`)
+### User (`backend/src/users/schemas/user.schema.ts`)
 | field          | type   | notes                          |
 |----------------|--------|---------------------------------|
 | `name`         | string | required                        |
@@ -53,14 +53,14 @@ explicit `id` field.
 | `createdAt`    | Date   | auto (`{ timestamps: true }`)   |
 | `updatedAt`    | Date   | auto (`{ timestamps: true }`)   |
 
-### Restaurant (`apps/api/src/restaurants/schemas/restaurant.schema.ts`)
+### Restaurant (`backend/src/restaurants/schemas/restaurant.schema.ts`)
 | field       | type   | notes                        |
 |-------------|--------|-------------------------------|
 | `name`      | string | required                      |
 | `createdAt` | Date   | auto (`{ timestamps: true }`) |
 | `updatedAt` | Date   | auto (`{ timestamps: true }`) |
 
-### RestaurantMember (`apps/api/src/restaurant-members/schemas/restaurant-member.schema.ts`)
+### RestaurantMember (`backend/src/restaurant-members/schemas/restaurant-member.schema.ts`)
 The join between a `User` and a `Restaurant`, carrying that user's role
 *for that specific restaurant* — this is what lets one user belong to
 zero, one, or many restaurants with a different role in each.
@@ -77,11 +77,11 @@ Indexes:
 - `{ userId: 1 }` — list a user's memberships.
 - `{ restaurantId: 1 }` — list a restaurant's members.
 
-### RestaurantRole (`apps/api/src/common/enums/restaurant-role.enum.ts`)
+### RestaurantRole (`backend/src/common/enums/restaurant-role.enum.ts`)
 Plain TypeScript enum (Mongoose has no first-class enum type of its own):
 `SUPER_ADMIN`, `RESTAURANT_ADMIN`, `RESTAURANT_STAFF`.
 
-### Category (`apps/api/src/menu/schemas/category.schema.ts`)
+### Category (`backend/src/menu/schemas/category.schema.ts`)
 Ported from `mnu_v1`'s Prisma `Category` model — see "Reconciled with
 `mnu_v1`" in `docs/PROGRESS.md` for why this exists on this codebase at all.
 
@@ -95,7 +95,7 @@ Ported from `mnu_v1`'s Prisma `Category` model — see "Reconciled with
 
 Index: `{ restaurantId: 1 }`.
 
-### MenuItem (`apps/api/src/menu/schemas/menu-item.schema.ts`)
+### MenuItem (`backend/src/menu/schemas/menu-item.schema.ts`)
 Ported from `mnu_v1`'s Prisma `MenuItem` model.
 
 | field          | type                          | notes                          |
@@ -143,9 +143,10 @@ before this matters for real data.
 ## Seeding
 
 ```bash
-pnpm --filter @mnu/api db:seed
+# run inside backend/
+npm run db:seed
 ```
-Runs `apps/api/src/database/seed.ts` — a standalone script (connects via
+Runs `backend/src/database/seed.ts` — a standalone script (connects via
 `mongoose.connect()` directly, outside Nest's DI container) that seeds one
 user with memberships (and different roles) across two restaurants, same
 as the old Prisma seed.
@@ -159,17 +160,17 @@ no `@prisma/client`, no `prisma` CLI, no `schema.prisma` in the active
 codebase.
 
 What changed:
-- `apps/api/src/prisma/` (`PrismaService`, `PrismaModule`) → replaced by
-  `apps/api/src/database/database.module.ts`.
-- `apps/api/prisma/schema.prisma` → replaced by three Mongoose schema
-  files under `apps/api/src/{users,restaurants,restaurant-members}/schemas/`.
-- `apps/api/prisma/seed.ts` → replaced by `apps/api/src/database/seed.ts`.
-- `AuthService` (`apps/api/src/auth/auth.service.ts`) rewritten to use
+- `backend/src/prisma/` (`PrismaService`, `PrismaModule`) → replaced by
+  `backend/src/database/database.module.ts`.
+- `backend/prisma/schema.prisma` → replaced by three Mongoose schema
+  files under `backend/src/{users,restaurants,restaurant-members}/schemas/`.
+- `backend/prisma/seed.ts` → replaced by `backend/src/database/seed.ts`.
+- `AuthService` (`backend/src/auth/auth.service.ts`) rewritten to use
   `@InjectModel()` + Mongoose query methods (`findOne`, `create`, `find`,
   `.populate()`) instead of `this.prisma.<model>.<method>()`.
 - `AppController`'s `/health` check: `$runCommandRaw({ ping: 1 })` →
   `connection.db.admin().ping()`.
-- `apps/api/package.json`: removed `@prisma/client`, `prisma`, and the
+- `backend/package.json`: removed `@prisma/client`, `prisma`, and the
   `prisma:generate`/`prisma:push`/`prisma:studio` scripts; added
   `@nestjs/mongoose`, `mongoose`, `dotenv`; `db:seed` now points at the
   new seed script.
@@ -179,7 +180,7 @@ What changed:
   none of them touch the database.
 
 **Old Prisma files were not deleted** — they're preserved at
-`apps/api/_archive/prisma-legacy/` (outside `src/`, so excluded from the
+`backend/_archive/prisma-legacy/` (outside `src/`, so excluded from the
 build) per the instruction not to remove working code until the Mongoose
 replacement is verified. See that folder's own `README.md` for what's in
 it and when it's safe to delete.
@@ -194,9 +195,9 @@ binary downloads, just for a different package. So this migration is
 verified as follows:
 
 **Verified:**
-- `tsc --noEmit` and `nest build` (`apps/api`) — clean, no Prisma
+- `tsc --noEmit` and `nest build` (`backend`) — clean, no Prisma
   references remain in the compiled `src/` tree.
-- `tsc --noEmit` and `next build` (`apps/web`) — clean, unaffected (the
+- `tsc --noEmit` and `next build` (`frontend`) — clean, unaffected (the
   frontend only talks HTTP to the API; it has no DB dependency).
 - The Nest app **boots**: `DatabaseModule` and `MongooseModule` initialize
   in the DI container without error, and the process correctly attempts
@@ -217,11 +218,12 @@ verified as follows:
   not been exercised end-to-end. Run this on your machine or against
   Atlas to confirm:
   ```bash
+  cd backend
   docker compose up -d          # starts mongo:7 locally
-  pnpm install
-  cp apps/api/.env.example apps/api/.env   # fill in DATABASE_URL + JWT_SECRET
-  pnpm --filter @mnu/api db:seed
-  pnpm dev
+  npm install
+  cp .env.example .env          # fill in DATABASE_URL + JWT_SECRET
+  npm run db:seed
+  npm run dev
   curl -X POST :3001/auth/register -d '{...}'
   curl :3001/health              # expect {"status":"ok","database":"connected"}
   ```
