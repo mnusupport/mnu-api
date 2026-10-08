@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuthorizationService } from '../common/authorization.service';
@@ -7,9 +7,6 @@ import { RestaurantMember, RestaurantMemberDocument } from '../restaurant-member
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { PaginationResult } from '../common/pagination';
 import { AuditLog, AuditLogDocument } from '../audit/audit-log.schema';
-import * as bcrypt from 'bcryptjs';
-import { signToken } from '../auth/jwt.util';
-import { RestaurantRole } from '../common/enums/restaurant-role.enum';
 
 @Injectable()
 export class PlatformAdminService {
@@ -109,53 +106,6 @@ export class PlatformAdminService {
       limit: pagination.limit,
       total,
       totalPages: Math.ceil(total / pagination.limit),
-    };
-  }
-
-  async createRestaurant(
-    userId: string,
-    input: { restaurant_name: string; name: string; email: string; password: string },
-  ) {
-    await this.authorization.requireSuperAdmin(userId);
-
-    const restaurantName = typeof input?.restaurant_name === 'string' ? input.restaurant_name.trim() : '';
-    const adminName = typeof input?.name === 'string' ? input.name.trim() : '';
-    const email = typeof input?.email === 'string' ? input.email.trim().toLowerCase() : '';
-    const password = typeof input?.password === 'string' ? input.password : '';
-
-    if (!restaurantName || !adminName || !email || !password) {
-      throw new BadRequestException('Restaurant name, admin name, email, and password are required.');
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new BadRequestException('Please provide a valid admin email address.');
-    }
-    if (password.length < 8) {
-      throw new BadRequestException('Password must be at least 8 characters.');
-    }
-    if (await this.userModel.exists({ email })) {
-      throw new ConflictException('Email already in use.');
-    }
-
-    const restaurant = await this.restaurantModel.create({ name: restaurantName });
-    const passwordHash = await bcrypt.hash(password, 10);
-    const user = await this.userModel.create({
-      name: adminName,
-      email,
-      passwordHash,
-      platformRole: 'USER',
-    });
-    const membership = await this.memberModel.create({
-      userId: user._id,
-      restaurantId: restaurant._id,
-      role: RestaurantRole.RESTAURANT_ADMIN,
-    });
-
-    const token = signToken({ user_id: user._id.toString() });
-    return {
-      restaurant: { id: restaurant._id.toString(), name: restaurant.name, createdAt: restaurant.createdAt },
-      admin: { id: user._id.toString(), name: user.name, email: user.email },
-      membership: { restaurant_id: membership.restaurantId.toString(), role: membership.role },
-      token,
     };
   }
 

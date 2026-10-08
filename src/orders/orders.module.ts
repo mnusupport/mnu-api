@@ -7,14 +7,13 @@ import { TableSession, TableSessionSchema } from '../table-sessions/schemas/tabl
 import { MenuItem, MenuItemSchema } from '../menu/schemas/menu-item.schema';
 import { RestaurantMember, RestaurantMemberSchema } from '../restaurant-members/schemas/restaurant-member.schema';
 import { Customer, CustomerSchema } from '../customers/schemas/customer.schema';
+import { CustomersModule } from '../customers/customers.module';
 import { OrdersController, AnalyticsController, CustomersController } from './orders.controller';
 import { PublicOrdersController } from './public-orders.controller';
 import { OrdersService } from './orders.service';
-import { CustomerRecognitionModule } from '../customers/customer-recognition.module';
 
 @Module({
   imports: [
-    CustomerRecognitionModule,
     // DatabaseModule already registers these globally; re-listing them
     // here keeps this module's model dependencies explicit — same
     // convention TableSessionsModule/TablesModule already use.
@@ -27,6 +26,7 @@ import { CustomerRecognitionModule } from '../customers/customer-recognition.mod
       { name: RestaurantMember.name, schema: RestaurantMemberSchema },
       { name: Customer.name, schema: CustomerSchema },
     ]),
+    CustomersModule,
   ],
   controllers: [OrdersController, AnalyticsController, CustomersController, PublicOrdersController],
   providers: [OrdersService],

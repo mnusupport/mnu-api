@@ -11,7 +11,7 @@ the persisted role on every request. The role is never taken from the client.
 The initial account is created manually from an operator machine:
 
 ```bash
-pnpm --filter @mnu/api db:bootstrap-super-admin
+npm run db:bootstrap-super-admin
 ```
 
 Required environment variables are documented in `.env.example`. The script refuses to create a second Super

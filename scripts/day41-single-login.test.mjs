@@ -1,0 +1,118 @@
+// Static architecture guard for the FINAL authentication architecture:
+//   one /login -> backend authenticates and reports the role -> role-based landing.
+// These are source-level checks (no browser is available here); the behavioural
+// proof is scripts/day41-single-login.e2e.test.mjs, which exercises the real API.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+const exists = (p) => fs.existsSync(path.join(root, p));
+
+function walk(dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (['node_modules', 'dist', '.next', '.git'].includes(e.name)) continue;
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) walk(full, out);
+    else out.push(full);
+  }
+  return out;
+}
+const sourceFiles = walk(root).filter((f) => /\.(ts|tsx|mjs|md|yml|yaml|example)$/.test(f) && !f.endsWith('.test.mjs') && !f.endsWith(path.join('docs', 'PROGRESS.md')));
+
+test('no obsolete separate-Super-Admin-login references remain in source or docs', () => {
+  const banned = [
+    /super-admin\/login/i,
+    /super-admin\/register/i,
+    /superAdminLogin/,
+    /Use the Super Admin sign-in/i,
+    /Login as Super Admin/i,
+    /Super Admin Login/, // case-sensitive: catches a UI label, not prose like "no separate Super Admin login"
+  ];
+  for (const f of sourceFiles) {
+    const s = fs.readFileSync(f, 'utf8');
+    for (const re of banned) assert.doesNotMatch(s, re, `${path.relative(root, f)} still references ${re}`);
+  }
+});
+
+test('the separate login/registration pages do not exist', () => {
+  assert.ok(!exists('frontend/app/super-admin/login'));
+  assert.ok(!exists('frontend/app/super-admin/register'));
+  assert.ok(exists('frontend/app/login/page.tsx'));
+});
+
+test('backend exposes one login endpoint and no Super Admin login/registration route', () => {
+  const ctrl = read('backend/src/auth/auth.controller.ts');
+  assert.equal((ctrl.match(/@Post\('login'\)/g) || []).length, 1);
+  assert.doesNotMatch(ctrl, /@Post\('super-admin/);
+  const svc = read('backend/src/auth/auth.service.ts');
+  assert.doesNotMatch(svc, /superAdminLogin/);
+  // authenticate() takes credentials only: no role/portal parameter from the client
+  assert.match(svc, /private async authenticate\(input: LoginInput\)/);
+  // registration always creates a normal user and never reads a role from the request
+  assert.match(svc, /platformRole: PlatformRole\.USER/);
+});
+
+test('/login has no role selector or Super Admin option and shares the landing logic', () => {
+  const login = read('frontend/app/login/page.tsx').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(login, /<select|role=|Super Admin/i);
+  assert.match(login, /resolveLanding\(/);
+  assert.match(login, /authApi\.login\(/);
+  assert.match(read('frontend/lib/api.ts'), /'\/auth\/login'/);
+  assert.doesNotMatch(read('frontend/lib/api.ts'), /super-admin\/login/);
+});
+
+test('role-based landing: SUPER_ADMIN -> platform panel, others -> their restaurant; one shared helper', () => {
+  const helper = read('frontend/lib/roleRouting.ts');
+  assert.match(helper, /SUPER_ADMIN[\s\S]*\/super-admin\/dashboard/);
+  assert.match(helper, /\/restaurants\/\$\{memberships\[0\]\.restaurant_id\}\/dashboard/);
+  assert.match(read('frontend/app/dashboard/page.tsx'), /resolveLanding\(/);
+  assert.match(read('frontend/app/super-admin/layout.tsx'), /resolveLanding\(/);
+});
+
+test('restaurant management pages use the shared selected-restaurant context, not membership-only gating', () => {
+  const layout = read('frontend/app/restaurants/[restaurantId]/layout.tsx');
+  assert.match(layout, /user\?\.platformRole === 'SUPER_ADMIN'/);
+  assert.match(layout, /Managing Restaurant/);
+
+  for (const page of ['menu', 'tables']) {
+    const source = read(`frontend/app/restaurants/[restaurantId]/${page}/page.tsx`);
+    assert.match(source, /useRestaurantContext\(\)/, `${page} page must consume the shared restaurant context`);
+    assert.doesNotMatch(source, /me\.memberships\.find/, `${page} page must not require a restaurant membership for SUPER_ADMIN`);
+    assert.doesNotMatch(source, /You don't have access to this restaurant\./, `${page} page must not reintroduce the membership-only access error`);
+  }
+});
+
+test('Super Admin routes are guarded in the UI and unauthenticated users go to the single /login', () => {
+  const layout = read('frontend/app/super-admin/layout.tsx');
+  assert.match(layout, /platformRole !== 'SUPER_ADMIN'/);
+  assert.match(layout, /router\.replace\('\/login'\)/);
+  assert.doesNotMatch(layout, /super-admin\/login/);
+  // navigation of the platform panel is separate from the restaurant sidebar
+  assert.doesNotMatch(read('frontend/app/restaurants/[restaurantId]/layout.tsx'), /POS Partners|Platform Analytics/);
+});
+
+test('logout from either panel returns to the single /login', () => {
+  assert.match(read('frontend/app/restaurants/[restaurantId]/layout.tsx'), /router\.push\('\/login'\)/);
+  const sa = read('frontend/app/super-admin/layout.tsx');
+  assert.match(sa, /removeItem\('mnu_token'\)[\s\S]{0,80}router\.replace\('\/login'\)/);
+});
+
+test('landing page offers a single sign-in entry', () => {
+  const home = read('frontend/app/page.tsx');
+  assert.equal((home.match(/href="\/login"/g) || []).length, 1);
+  assert.doesNotMatch(home, /Super Admin/);
+});
+
+test('no hard-coded Super Admin credentials in tracked source/config', () => {
+  for (const f of sourceFiles) {
+    const s = fs.readFileSync(f, 'utf8');
+    // SUPER_ADMIN_PASSWORD may appear only as a variable name / placeholder, never with a real value
+    for (const m of s.matchAll(/SUPER_ADMIN_PASSWORD[ \t]*[=:][ \t]*([^\s#]+)/g)) {
+      assert.match(m[1], /^(replace-with|<|\$|process\.env|\$\{|your-|change|['"`]?$)/i, `${path.relative(root, f)} has a concrete SUPER_ADMIN_PASSWORD value`);
+    }
+  }
+});

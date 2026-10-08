@@ -1,26 +1,16 @@
-# MnU — Backend
+# MnU
 
-NestJS 10 + Mongoose (MongoDB). Standalone project: it has its own `package.json`,
-`package-lock.json`, `.env.example` and local MongoDB `docker-compose.yml`, and shares
-no code or workspace tooling with the frontend. The frontend (`../frontend`) calls it
-over HTTP only; allow its origin through `CORS_ORIGINS`.
+Two independent projects (no shared workspace, no shared code):
 
-## Setup
-```bash
-npm ci                         # or: npm install
-cp .env.example .env           # set DATABASE_URL, JWT_SECRET (>= 32 chars), CORS_ORIGINS
-docker compose up -d           # optional: local MongoDB 7 on :27017
-npm run dev                    # http://localhost:3001  (GET /health)
-```
+| Folder | What | Run |
+|---|---|---|
+| `backend/` | NestJS + MongoDB API | `cd backend && npm ci && npm run dev` (port 3001) |
+| `frontend/` | Next.js customer menu + admin UI | `cd frontend && npm ci && npm run dev` (port 3000) |
 
-## Scripts
-- `npm run dev` — watch mode · `npm run build` — compile to `dist/` · `npm run start` — `node dist/main`
-- `npm run db:seed` — seed local demo data
-- `npm run db:bootstrap-super-admin` — create the first Super Admin (see `../docs/DEPLOYMENT.md`)
-- `npm run lint`
+The frontend reaches the backend only through `NEXT_PUBLIC_API_URL`; the backend allows the
+frontend origin through `CORS_ORIGINS`. Each can be installed, built and deployed on its own
+(each has its own `package-lock.json` and `.env.example`).
 
-## Environment
-All variable names (with explanations) are in `.env.example`. Never commit real values.
-
-## Docs
-Project documentation lives in `../docs/` (`DEPLOYMENT.md`, `DATABASE.md`, `PROGRESS.md`).
+- `docs/` — documentation (`PROGRESS.md` is the running history).
+- `scripts/` — source-level regression tests that read both projects:
+  `node --test scripts/*.test.mjs`

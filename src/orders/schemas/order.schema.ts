@@ -10,11 +10,6 @@ import { MenuItem } from '../../menu/schemas/menu-item.schema';
 // (enforced in OrdersService.updateStatus, not in the schema itself),
 // ending at the terminal COMPLETED — or CANCELLED, reachable from any
 // non-terminal state.
-export enum OrderType {
-  DINE_IN = 'DINE_IN',
-  TAKEAWAY = 'TAKEAWAY',
-}
-
 export enum OrderStatus {
   NEW = 'NEW',
   CONFIRMED = 'CONFIRMED',
@@ -48,11 +43,6 @@ export class OrderItem {
   @Prop({ type: Number, required: true })
   lineTotal: number;
 
-  // Snapshot of the menu image at checkout so historical admin orders do not
-  // depend on the current menu item remaining unchanged.
-  @Prop({ type: String, required: false, default: null })
-  imageUrl?: string | null;
-
   // ---- Group ordering ----
   // Who at the table asked for this line. Null on a normal solo order;
   // always set on a group order, because a single combined order is
@@ -69,40 +59,24 @@ export class OrderItem {
 
 export const OrderItemSchema = SchemaFactory.createForClass(OrderItem);
 
-@Schema({ _id: false })
-export class OrderGroupMemberSnapshot {
-  @Prop({ type: String, required: true })
-  participantId: string;
-
-  @Prop({ type: String, required: true })
-  name: string;
-
-  @Prop({ type: String, required: false, default: null })
-  phoneMasked?: string | null;
-}
-export const OrderGroupMemberSnapshotSchema = SchemaFactory.createForClass(OrderGroupMemberSnapshot);
-
 @Schema({ timestamps: true })
 export class Order {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: Restaurant.name, required: true })
   restaurantId: Types.ObjectId;
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: Table.name, required: false, default: null })
-  tableId?: Types.ObjectId | null;
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: Table.name, required: true })
+  tableId: Types.ObjectId;
 
   // Snapshotted alongside tableId, same rationale as item name/price
   // above — the admin orders list (Day 12, Part 5) needs to show a
   // table number per row without an extra lookup per order, and a
   // table's own number could in principle be renamed later without that
   // affecting what an already-placed order displays.
-  @Prop({ type: String, required: false, default: null })
-  tableNumber?: string | null;
+  @Prop({ type: String, required: true })
+  tableNumber: string;
 
-  @Prop({ type: String, enum: OrderType, required: true, default: OrderType.DINE_IN })
-  orderType: OrderType;
-
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: TableSession.name, required: false, default: null })
-  tableSessionId?: Types.ObjectId | null;
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: TableSession.name, required: true })
+  tableSessionId: Types.ObjectId;
 
   // Short, customer/admin-facing identifier — distinct from Mongo's own
   // _id, same reasoning as TableSession.sessionId: never make someone
@@ -132,23 +106,14 @@ export class Order {
   idempotencyKey?: string;
 
 
-  // Name typed by the customer at checkout (QR / takeaway). Name only - no phone
-  // number is collected. Stored on the existing orders collection; no Customer
-  // record is created. Optional so legacy orders without a name remain valid.
-  @Prop({ type: String, required: false, default: null })
-  customerName?: string | null;
-
-  // Privacy-safe contact snapshot for public orders. Display data only; it is
-  // never used as customer identity or authorization. Optional for name-only
-  // checkout and older orders.
-  @Prop({ type: String, required: false, default: null, maxlength: 32 })
-  customerPhoneMasked?: string | null;
-
-  // Legacy optional customer association. Public QR ordering no longer
-  // creates or requires Customer records; older/admin-managed orders may
-  // still contain this field and it remains optional for compatibility.
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Customer', required: false, default: null })
-  customerId?: Types.ObjectId | null;
+  // Which authenticated customer placed this order (this task, Part 7).
+  // Optional at the schema level only for forward-compatibility with any
+  // pre-existing rows that predate customer auth — every order created
+  // through the current flow always has one, enforced by
+  // CustomerAuthGuard on the public create-order endpoint, not by a
+  // `required: true` here.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Customer', required: false })
+  customerId?: Types.ObjectId;
 
   // ---- Group ordering ----
   // Set only when this order was placed from a group lobby. Its presence
@@ -162,9 +127,6 @@ export class Order {
 
   @Prop({ type: String, required: false, default: null })
   groupCode?: string | null;
-
-  @Prop({ type: [OrderGroupMemberSnapshotSchema], required: false, default: [] })
-  groupMembers: OrderGroupMemberSnapshot[];
 
   // Populated automatically by `{ timestamps: true }` above (Mongoose
   // adds the actual schema paths itself) — declared here, undecorated,

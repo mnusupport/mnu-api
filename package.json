@@ -1,5 +1,5 @@
 {
-  "name": "@mnu/api",
+  "name": "mnu-api",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -8,7 +8,8 @@
     "start": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "db:seed": "ts-node src/database/seed.ts",
-    "db:bootstrap-super-admin": "ts-node src/database/bootstrap-super-admin.ts"
+    "db:bootstrap-super-admin": "ts-node src/database/bootstrap-super-admin.ts",
+    "test": "npm run build && node --test \"scripts/*.test.mjs\""
   },
   "dependencies": {
     "@cloudinary/react": "^1.14.4",
