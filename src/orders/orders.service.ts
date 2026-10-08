@@ -566,7 +566,19 @@ export class OrdersService {
     // wins, then the Node process TZ, with Asia/Kolkata as MnU's current local
     // application default. This keeps calendar boundaries consistent for the
     // dashboard until restaurants gain an explicit timezone field.
-    const timezone = process.env.APP_TIMEZONE || process.env.TZ || 'Asia/Kolkata';
+    // Hosts like Vercel/AWS Lambda set TZ=":UTC", which Intl and MongoDB
+    // reject as an invalid zone (that crashed this endpoint with a 500).
+    // So every candidate is validated, and a bare host default of UTC is
+    // not treated as a deliberate choice.
+    const isValidZone = (zone: string) => {
+      try { new Intl.DateTimeFormat('en-US', { timeZone: zone }); return true; } catch { return false; }
+    };
+    const hostTz = (process.env.TZ ?? '').replace(/^:/, '').trim();
+    const candidates = [
+      (process.env.APP_TIMEZONE ?? '').trim(),
+      /^(utc|etc\/utc|gmt)$/i.test(hostTz) ? '' : hostTz,
+    ];
+    const timezone = candidates.find((z) => z && isValidZone(z)) ?? 'Asia/Kolkata';
     const localParts = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
       year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short',
