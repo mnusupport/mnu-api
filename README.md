@@ -1,4 +1,4 @@
-# MnU — Backend
+# Mr.wiserr — Backend (formerly MnU)
 
 NestJS 10 + Mongoose (MongoDB). Standalone project: it has its own `package.json`,
 `package-lock.json`, `.env.example` and local MongoDB `docker-compose.yml`, and shares

@@ -8,7 +8,7 @@ async function main() {
   const uri = process.env.DATABASE_URL;
   const email = process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase();
   const password = process.env.SUPER_ADMIN_PASSWORD;
-  const name = process.env.SUPER_ADMIN_NAME?.trim() || 'MnU Super Admin';
+  const name = process.env.SUPER_ADMIN_NAME?.trim() || 'Mr.wiserr Super Admin';
 
   if (!uri || !email || !password) {
     throw new Error('DATABASE_URL, SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD are required.');

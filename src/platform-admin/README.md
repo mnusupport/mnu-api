@@ -1,4 +1,4 @@
-# MnU Platform Admin
+# Mr.wiserr Platform Admin
 
 There is **one** login for every account (`/login` -> `POST /auth/login`). The backend authenticates the
 credentials and reports the account's role (`User.platformRole`: `USER` or `SUPER_ADMIN`); the web app then
