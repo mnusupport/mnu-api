@@ -1,6 +1,6 @@
 import { v2 as cloudinary } from 'cloudinary';
 
-// This task: menu item images move from local disk (uploads/,
+// This task: menu item images move from local disk (backend/uploads/,
 // served via useStaticAssets — see main.ts's prior version and
 // docs/PROGRESS.md's Day 16 "known issues") to real online storage, so
 // files survive a redeploy and work across multiple API instances.

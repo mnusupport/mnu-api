@@ -5,7 +5,7 @@ import { RATE_LIMIT_KEY, RateLimitOptions } from '../decorators/rate-limit.decor
 
 type Bucket = { count: number; resetAt: number };
 
-type RequestWithIdentity = Request & { userId?: string; customerId?: string };
+type RequestWithIdentity = Request & { userId?: string };
 
 @Injectable()
 export class RateLimitGuard implements CanActivate {
@@ -24,7 +24,7 @@ export class RateLimitGuard implements CanActivate {
     const response = context.switchToHttp().getResponse<Response>();
     const now = Date.now();
     const route = `${request.method}:${request.route?.path ?? request.path}`;
-    const identity = request.userId ? `user:${request.userId}` : request.customerId ? `customer:${request.customerId}` : `ip:${request.ip ?? 'unknown'}`;
+    const identity = request.userId ? `user:${request.userId}` : `ip:${request.ip ?? 'unknown'}`;
     const key = `${route}:${identity}`;
     let bucket = this.buckets.get(key);
 

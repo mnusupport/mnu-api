@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, ForbiddenException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUserId } from './current-user.decorator';
@@ -9,20 +9,11 @@ import { RateLimitGuard } from '../common/guards/rate-limit.guard';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @UseGuards(RateLimitGuard)
-  @RateLimit(5, 60_000)
   @Post('register')
-  register(
-    @Body()
-    body: {
-      restaurant_name: string;
-      name: string;
-      email: string;
-      password: string;
-      password_confirmation: string;
-    },
-  ) {
-    return this.authService.register(body);
+  register() {
+    // Restaurant registration is intentionally not a public/self-service
+    // capability. Restaurant creation is controlled by Super Admin.
+    throw new ForbiddenException('Restaurant registration is available only to Super Admin.');
   }
 
   @UseGuards(RateLimitGuard)
@@ -38,7 +29,7 @@ export class AuthController {
     return this.authService.me(userId);
   }
 
-  // JWTs are stateless and short-lived (7d) — there's no server-side
+  // JWTs are stateless and expire after 30d — there's no server-side
   // session to destroy. This endpoint exists so the client has a single,
   // consistent "log out" call (and a hook point for a token-blocklist
   // later, if that's ever needed); the guard also confirms the token was

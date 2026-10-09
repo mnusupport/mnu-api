@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUserId } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RateLimit } from '../common/decorators/rate-limit.decorator';
@@ -27,6 +27,14 @@ export class PlatformAdminController {
     @Query('restaurantId') restaurantId?: string,
   ) {
     return this.service.listAuditLogs(userId, parsePagination({ page, limit }), restaurantId);
+  }
+
+  @Post('restaurants')
+  createRestaurant(
+    @CurrentUserId() userId: string,
+    @Body() body: { restaurant_name: string; name: string; email: string; password: string },
+  ) {
+    return this.service.createRestaurant(userId, body);
   }
 
   @Get('restaurants')

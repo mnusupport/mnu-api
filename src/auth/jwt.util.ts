@@ -15,33 +15,13 @@ function getSecret(): string {
   return secret;
 }
 
+// Admin sessions are intentionally persistent across normal browser returns.
+// The token is still server-validated on every protected request and expires
+// after 30 days; logout removes it from the browser.
 export function signToken(payload: TokenPayload): string {
-  return jwt.sign(payload, getSecret(), { expiresIn: '7d' });
+  return jwt.sign(payload, getSecret(), { expiresIn: '30d' });
 }
 
 export function verifyToken(token: string): TokenPayload {
   return jwt.verify(token, getSecret()) as TokenPayload;
-}
-
-// ---- Customer sessions --------------------------------------------------
-// A customer session is only a convenience for repeat ordering/history; it
-// is not phone verification. New sessions are restaurant-scoped so a token
-// created for Restaurant A cannot be reused against Restaurant B.
-export interface CustomerTokenPayload {
-  customer_id: string;
-  restaurant_id: string;
-  type: 'customer';
-}
-
-export function signCustomerToken(customerId: string, restaurantId: string): string {
-  const payload: CustomerTokenPayload = { customer_id: customerId, restaurant_id: restaurantId, type: 'customer' };
-  return jwt.sign(payload, getSecret(), { expiresIn: '30d' });
-}
-
-export function verifyCustomerToken(token: string): CustomerTokenPayload {
-  const decoded = jwt.verify(token, getSecret()) as Partial<CustomerTokenPayload>;
-  if (decoded.type !== 'customer' || typeof decoded.customer_id !== 'string' || typeof decoded.restaurant_id !== 'string') {
-    throw new Error('Not a customer token.');
-  }
-  return decoded as CustomerTokenPayload;
 }

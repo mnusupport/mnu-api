@@ -8,7 +8,7 @@ import { UserSchema } from '../users/schemas/user.schema';
 
 // Minimal seed proving the User -> RestaurantMember -> Restaurant
 // relationship: one user with two different roles across two restaurants.
-// Standalone script (run with `npm run db:seed`), same role Prisma's
+// Standalone script (run with `pnpm db:seed`), same role Prisma's
 // `prisma/seed.ts` played — not wired into Nest's DI container.
 
 async function main() {

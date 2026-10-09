@@ -65,7 +65,7 @@ function warnIfCloudinaryUnconfigured() {
   if (missing.length > 0) {
     // eslint-disable-next-line no-console
     console.warn(
-      `⚠️  Menu item image uploads are DISABLED: missing ${missing.join(', ')} in .env. ` +
+      `⚠️  Menu item image uploads are DISABLED: missing ${missing.join(', ')} in backend/.env. ` +
         'Get these three values from your Cloudinary dashboard (Settings → API Keys) and add them to .env — see .env.example.',
     );
   }
@@ -79,7 +79,7 @@ async function bootstrap() {
   app.enableShutdownHooks();
   // Behind a hosting proxy/load balancer, req.ip is the proxy unless Express
   // is told how many proxy hops to trust. Without this the per-IP rate limits
-  // (login, customer sessions, orders) would treat ALL users as one client. Set
+  // (login and public ordering) would treat ALL users as one client. Set
   // TRUST_PROXY=1 on hosts that put exactly one proxy in front of the API.
   const trustProxy = process.env.TRUST_PROXY?.trim();
   if (trustProxy) {

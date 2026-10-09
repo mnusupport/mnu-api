@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { RestaurantMember, RestaurantMemberDocument } from '../restaurant-members/schemas/restaurant-member.schema';
@@ -7,10 +7,9 @@ import { Table, TableDocument } from '../tables/schemas/table.schema';
 import { TableSession, TableSessionDocument, TableSessionStatus } from '../table-sessions/schemas/table-session.schema';
 import { MenuItem, MenuItemDocument } from '../menu/schemas/menu-item.schema';
 import { Customer, CustomerDocument } from '../customers/schemas/customer.schema';
-import { Order, OrderDocument, OrderStatus } from './schemas/order.schema';
+import { Order, OrderDocument, OrderStatus, OrderType } from './schemas/order.schema';
 import { PaginationResult } from '../common/pagination';
 import { AuthorizationService } from '../common/authorization.service';
-import { CustomerAuthService } from '../customers/customer-auth.service';
 
 // Day 22 (Part 5/6/15) — minimum total quantity ordered before an item
 // is allowed to appear in the customer-facing "Most ordered" section.
@@ -50,10 +49,42 @@ export class OrdersService {
     private readonly restaurantMemberModel: Model<RestaurantMemberDocument>,
     @InjectModel(Customer.name) private readonly customerModel: Model<CustomerDocument>,
     private readonly authorization: AuthorizationService,
-    private readonly customerAuthService: CustomerAuthService,
   ) {}
 
   // ---- Shared validation ----
+
+  private maskCustomerPhone(phone: string): string {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 4) return '••••';
+    const suffix = digits.slice(-2);
+    const local = digits.slice(-10);
+    const country = digits.length > 10 ? `+${digits.slice(0, -10)} ` : '';
+    return `${country}${local.slice(0, 2)}XXXXXX${suffix}`;
+  }
+
+  private normalizeMaskedPhone(raw: unknown): string | null {
+    if (raw == null || raw === '') return null;
+    if (typeof raw !== 'string') throw new BadRequestException('Invalid customer phone display.');
+    const value = raw.trim();
+    if (!/^(?:\+\d{1,3}\s*)?\d{2}X{3,11}\d{2}$/.test(value)) {
+      throw new BadRequestException('Invalid customer phone display.');
+    }
+    return value;
+  }
+
+  private normalizeCustomerName(raw: unknown): string {
+    if (typeof raw !== 'string' || raw.trim() === '') {
+      throw new BadRequestException('Please enter your name to place the order.');
+    }
+    const name = raw.trim().replace(/\s+/g, ' ');
+    if (name.length < 2 || name.length > 80) {
+      throw new BadRequestException('Name must be between 2 and 80 characters.');
+    }
+    if (!/^[\p{L}\p{M}][\p{L}\p{M}' .-]*$/u.test(name)) {
+      throw new BadRequestException('Name can contain only letters, spaces, apostrophes, dots and hyphens.');
+    }
+    return name;
+  }
 
   private assertValidId(id: string, label: string) {
     if (!Types.ObjectId.isValid(id)) {
@@ -61,16 +92,34 @@ export class OrdersService {
     }
   }
 
-  // ---- Public: place an order (customer identity is supplied at checkout) ----
+  // ---- Public: anonymous QR order creation ----
 
-  // SECURITY: the only things trusted from the client are itemId and
-  // quantity. Every price comes from MongoDB, read fresh, right here —
-  // never from the request body. See the pricing loop below.
-  // Customer identity is created/resolved from the checkout name + phone.
-  // The phone is customer-provided and is NOT treated as verified.
-  async createOrder(restaurantId: string, tableId: string, rawItems: OrderItemInput[], customerName: string, customerPhone: string, rawIdempotencyKey?: string) {
+  // Only a customer name is required - no other contact detail, customer record or
+  // customer session is involved. Prices and totals are always recomputed from
+  // restaurant-owned menu data on the server.
+  async createOrder(
+    restaurantId: string,
+    tableId: string | undefined,
+    rawOrderType: 'DINE_IN' | 'TAKEAWAY' | undefined,
+    rawItems: OrderItemInput[],
+    rawIdempotencyKey?: string,
+    rawCustomerName?: string,
+    rawCustomerPhoneMasked?: string,
+    customerId?: Types.ObjectId | null,
+  ) {
     this.assertValidId(restaurantId, 'Restaurant');
-    this.assertValidId(tableId, 'Table');
+    const customerName = this.normalizeCustomerName(rawCustomerName);
+    const customerPhoneMasked = this.normalizeMaskedPhone(rawCustomerPhoneMasked);
+    const orderType = rawOrderType ?? OrderType.DINE_IN;
+    if (!Object.values(OrderType).includes(orderType as OrderType)) {
+      throw new BadRequestException('Invalid order type.');
+    }
+    if (orderType === OrderType.DINE_IN) {
+      if (!tableId) throw new BadRequestException('A table is required for dine-in orders.');
+      this.assertValidId(tableId, 'Table');
+    } else if (tableId) {
+      throw new BadRequestException('Takeaway orders cannot specify a table.');
+    }
 
     if (!Array.isArray(rawItems) || rawItems.length === 0) {
       throw new BadRequestException('Your cart is empty.');
@@ -89,11 +138,8 @@ export class OrdersService {
       throw new NotFoundException('Restaurant not found.');
     }
 
-    const identity = await this.customerAuthService.identify(restaurantId, customerName, customerPhone);
-    const customerId = identity.customer.id;
-
     if (idempotencyKey) {
-      const existing = await this.orderModel.findOne({ restaurantId, customerId, idempotencyKey });
+      const existing = await this.orderModel.findOne({ restaurantId, idempotencyKey });
       if (existing) {
         return {
           id: existing._id.toString(),
@@ -102,33 +148,25 @@ export class OrdersService {
           subtotal: existing.subtotal,
           total: existing.total,
           items: existing.items.map((i) => ({ name: i.name, price: i.price, quantity: i.quantity, lineTotal: i.lineTotal })),
-          table: { tableNumber: existing.tableNumber },
+          orderType: existing.orderType,
+          table: existing.tableNumber ? { tableNumber: existing.tableNumber } : null,
           restaurant: { name: (await this.restaurantModel.findById(existing.restaurantId))?.name ?? 'Restaurant' },
           createdAt: existing.createdAt,
-          customerToken: identity.token,
         };
       }
     }
 
-    // Table must exist AND belong to this restaurant — same combined
-    // lookup every other restaurant-scoped read in this project uses.
-    const table = await this.tableModel.findOne({ _id: tableId, restaurantId });
-    if (!table) {
-      throw new NotFoundException('Table not found.');
-    }
+    let table: TableDocument | null = null;
+    let session: TableSessionDocument | null = null;
+    if (orderType === OrderType.DINE_IN) {
+      // Table must exist AND belong to this restaurant.
+      table = await this.tableModel.findOne({ _id: tableId, restaurantId });
+      if (!table) throw new NotFoundException('Table not found.');
 
-    // Never trust a client-submitted session token for this — derive
-    // the currently-active session for this exact table server-side.
-    // This is also what makes "table session is valid/active" a real
-    // check rather than a client-asserted claim: no active session, no
-    // order, full stop.
-    const session = await this.sessionModel.findOne({
-      tableId,
-      restaurantId,
-      status: TableSessionStatus.ACTIVE,
-    });
-    if (!session) {
-      throw new BadRequestException('No active session for this table. Please scan the table QR code again.');
+      // Dine-in orders still require the active QR table session. Takeaway
+      // orders deliberately have neither a table nor a table session.
+      session = await this.sessionModel.findOne({ tableId, restaurantId, status: TableSessionStatus.ACTIVE });
+      if (!session) throw new BadRequestException('No active session for this table. Please scan the table QR code again.');
     }
 
     for (const raw of rawItems) {
@@ -169,6 +207,7 @@ export class OrdersService {
         price: menuItem.price,
         quantity: raw.quantity,
         lineTotal,
+        imageUrl: menuItem.imageUrl ?? null,
       };
     });
 
@@ -188,20 +227,23 @@ export class OrdersService {
       order = await this.orderModel.create({
         _id,
         restaurantId,
-        tableId,
-        tableNumber: table.tableNumber,
-        tableSessionId: session._id,
+        tableId: table?._id ?? null,
+        tableNumber: table?.tableNumber ?? null,
+        orderType,
+        tableSessionId: session?._id ?? null,
         orderNumber,
+        customerName,
+        customerPhoneMasked,
+        ...(customerId ? { customerId } : {}),
         items,
         subtotal,
         total,
         status: OrderStatus.NEW,
-        customerId,
         ...(idempotencyKey ? { idempotencyKey } : {}),
       });
     } catch (err: unknown) {
       if (idempotencyKey && typeof err === 'object' && err !== null && 'code' in err && (err as { code?: number }).code === 11000) {
-        const existing = await this.orderModel.findOne({ restaurantId, customerId, idempotencyKey });
+        const existing = await this.orderModel.findOne({ restaurantId, idempotencyKey });
         if (existing) {
           return {
             id: existing._id.toString(),
@@ -210,7 +252,8 @@ export class OrdersService {
             subtotal: existing.subtotal,
             total: existing.total,
             items: existing.items.map((i) => ({ name: i.name, price: i.price, quantity: i.quantity, lineTotal: i.lineTotal })),
-            table: { tableNumber: existing.tableNumber },
+            orderType: existing.orderType,
+            table: existing.tableNumber ? { tableNumber: existing.tableNumber } : null,
             restaurant: { name: restaurant.name },
             createdAt: existing.createdAt,
           };
@@ -231,10 +274,10 @@ export class OrdersService {
         quantity: i.quantity,
         lineTotal: i.lineTotal,
       })),
-      table: { tableNumber: table.tableNumber },
+      orderType: order.orderType,
+      table: order.tableNumber ? { tableNumber: order.tableNumber } : null,
       restaurant: { name: restaurant.name },
       createdAt: order.createdAt,
-      customerToken: identity.token,
     };
   }
 
@@ -343,12 +386,14 @@ export class OrdersService {
     return {
       id: order._id.toString(),
       orderNumber: order.orderNumber,
-      tableNumber: order.tableNumber,
+      tableNumber: order.tableNumber ?? null,
+      orderType: order.orderType,
       items: order.items.map((i) => ({
         name: i.name,
         price: i.price,
         quantity: i.quantity,
         lineTotal: i.lineTotal,
+        imageUrl: i.imageUrl ?? null,
         // Null on a solo order; on a group order this is who at the
         // table asked for this line, so the kitchen ticket stays
         // actionable even though it's one combined order.
@@ -357,6 +402,13 @@ export class OrdersService {
       // Present only on a group order — the admin UI uses this to badge
       // the row and to group the item list by member.
       groupCode: order.groupCode ?? null,
+      groupMembers: (order.groupMembers ?? []).map((member) => ({
+        participantId: member.participantId,
+        name: member.name,
+        phoneMasked: member.phoneMasked ?? null,
+      })),
+      customerName: order.customerName ?? null,
+      customerPhoneMasked: order.customerPhoneMasked ?? null,
       subtotal: order.subtotal,
       total: order.total,
       status: order.status,
@@ -514,7 +566,19 @@ export class OrdersService {
     // wins, then the Node process TZ, with Asia/Kolkata as MnU's current local
     // application default. This keeps calendar boundaries consistent for the
     // dashboard until restaurants gain an explicit timezone field.
-    const timezone = process.env.APP_TIMEZONE || process.env.TZ || 'Asia/Kolkata';
+    // Hosts like Vercel/AWS Lambda set TZ=":UTC", which Intl and MongoDB
+    // reject as an invalid zone (that crashed this endpoint with a 500).
+    // So every candidate is validated, and a bare host default of UTC is
+    // not treated as a deliberate choice.
+    const isValidZone = (zone: string) => {
+      try { new Intl.DateTimeFormat('en-US', { timeZone: zone }); return true; } catch { return false; }
+    };
+    const hostTz = (process.env.TZ ?? '').replace(/^:/, '').trim();
+    const candidates = [
+      (process.env.APP_TIMEZONE ?? '').trim(),
+      /^(utc|etc\/utc|gmt)$/i.test(hostTz) ? '' : hostTz,
+    ];
+    const timezone = candidates.find((z) => z && isValidZone(z)) ?? 'Asia/Kolkata';
     const localParts = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
       year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short',
@@ -637,75 +701,75 @@ export class OrdersService {
   }
 
   // ---- Customer: own order history/details ----
-  // Customer identity comes only from CustomerAuthGuard. RestaurantId is
-  // also part of every query, so a customer can see their own orders only
+  // Customer identity for history comes from the restaurant-scoped customer
+  // session convenience token. Checkout itself does not require that token.
+  // RestaurantId is also part of every query, so a customer can see their own orders only
   // for the restaurant whose context they requested.
-  async listOwnOrdersForRestaurant(restaurantId: string, customerId: string, pagination: PaginationResult) {
+  async listPublicOrdersForRestaurant(restaurantId: string, pagination: PaginationResult, customerId?: Types.ObjectId | null) {
     this.assertValidId(restaurantId, 'Restaurant');
-    this.assertValidId(customerId, 'Customer');
-
-    const [restaurant, customer] = await Promise.all([
-      this.restaurantModel.findById(restaurantId),
-      this.customerModel.findById(customerId),
-    ]);
+    const restaurant = await this.restaurantModel.findById(restaurantId).select('name').lean();
     if (!restaurant) throw new NotFoundException('Restaurant not found.');
-    if (!customer) throw new UnauthorizedException('Session expired. Please verify again.');
 
-    const orders = await this.orderModel.find({ restaurantId, customerId }).sort({ createdAt: -1 }).skip(pagination.skip).limit(pagination.limit);
+    // No token / invalid token means no private history. The browser never
+    // supplies a customerId; the controller derives this value only after
+    // validating the opaque, restaurant-scoped recognition token.
+    if (!customerId) {
+      return { restaurant: { id: restaurantId, name: restaurant.name }, customer: null, orders: [] };
+    }
+
+    const customer = await this.customerModel
+      .findOne({ _id: customerId, restaurantId: new Types.ObjectId(restaurantId) })
+      .select('name mobileNumber')
+      .lean();
+    if (!customer) {
+      return { restaurant: { id: restaurantId, name: restaurant.name }, customer: null, orders: [] };
+    }
+
+    const orders = await this.orderModel
+      .find({ restaurantId: new Types.ObjectId(restaurantId), customerId })
+      .sort({ createdAt: -1 })
+      .skip(pagination.skip)
+      .limit(pagination.limit);
+
     return {
-      restaurant: { id: restaurant._id.toString(), name: restaurant.name },
-      customer: { id: customer._id.toString(), name: customer.name ?? null },
-      orders: orders.map((order) => this.serializeCustomerOrder(order, customer, restaurant.name)),
+      restaurant: { id: restaurantId, name: restaurant.name },
+      customer: {
+        id: customer._id.toString(),
+        name: customer.name ?? null,
+        maskedPhone: customer.mobileNumber ? this.maskCustomerPhone(customer.mobileNumber) : null,
+      },
+      orders: orders.map((order) => this.serializeOrderSummary(order)),
     };
   }
 
-  async getOwnOrderForRestaurant(restaurantId: string, orderId: string, customerId: string) {
+  async getPublicOrderForRestaurant(restaurantId: string, orderId: string) {
     this.assertValidId(restaurantId, 'Restaurant');
     this.assertValidId(orderId, 'Order');
-    this.assertValidId(customerId, 'Customer');
-
-    const order = await this.orderModel.findOne({ _id: orderId, restaurantId, customerId });
+    const order = await this.orderModel.findOne({ _id: orderId, restaurantId });
     if (!order) throw new NotFoundException('Order not found.');
-
-    const [restaurant, customer] = await Promise.all([
-      this.restaurantModel.findById(restaurantId),
-      this.customerModel.findById(customerId),
-    ]);
+    const restaurant = await this.restaurantModel.findById(restaurantId).select('name').lean();
     if (!restaurant) throw new NotFoundException('Restaurant not found.');
-    if (!customer) throw new UnauthorizedException('Session expired. Please verify again.');
-
-    return this.serializeCustomerOrder(order, customer, restaurant.name);
-  }
-
-  private serializeCustomerOrder(order: OrderDocument, customer: CustomerDocument, restaurantName: string) {
     return {
       id: order._id.toString(),
       orderNumber: order.orderNumber,
-      restaurant: { id: order.restaurantId.toString(), name: restaurantName },
-      tableNumber: order.tableNumber,
+      restaurant: { id: restaurantId, name: restaurant.name },
+      tableNumber: order.tableNumber ?? null,
+      orderType: order.orderType,
       items: order.items.map((item) => ({
         name: item.name,
         price: item.price,
         quantity: item.quantity,
         lineTotal: item.lineTotal,
-        addedByName: item.addedByName ?? null,
       })),
       subtotal: order.subtotal,
       total: order.total,
       status: order.status,
       createdAt: order.createdAt,
-      customer: { id: customer._id.toString(), name: customer.name ?? null },
+      customer: null,
       groupCode: order.groupCode ?? null,
     };
   }
 
-  // ---- Part 7/8 foundation: one customer's order history, scoped to
-  // exactly this restaurant. Originally added with no UI consumer
-  // ("do not build the full Customer Memory UI yet") — this task is
-  // that consumer, so the method is extended (not duplicated) to also
-  // return the customer's own profile fields alongside their orders,
-  // since the Customer History screen needs both in one request. The
-  // orders array shape (`serializeOrderSummary`) is unchanged.
   // Restaurant isolation comes from the same {restaurantId, customerId}
   // filter every other restaurant-scoped query in this service already
   // uses — a customer's orders at a different restaurant are never part
