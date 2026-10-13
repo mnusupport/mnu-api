@@ -72,6 +72,32 @@ export class Restaurant {
   @Prop({ type: String, default: null }) cardStyle: 'glass' | 'solid' | 'soft' | null;
   @Prop({ type: String, default: null }) heroEyebrow: string | null;
   @Prop({ type: String, default: null }) heroTagline: string | null;
+
+  // Restaurant profile and billing preferences. Kept on the existing tenant
+  // record to avoid a duplicate settings collection; issued bills will store
+  // their own immutable snapshots in the future billing task.
+  @Prop({ type: String, default: null }) legalBusinessName: string | null;
+  @Prop({ type: String, default: null }) contactPhone: string | null;
+  @Prop({ type: String, default: null }) contactEmail: string | null;
+  @Prop({ type: String, default: null }) addressLine: string | null;
+  @Prop({ type: String, default: null }) city: string | null;
+  @Prop({ type: String, default: null }) state: string | null;
+  @Prop({ type: String, default: null }) pinCode: string | null;
+  @Prop({ type: String, default: 'India' }) country: string;
+  @Prop({ type: String, enum: ['REGISTERED', 'NOT_REGISTERED'], default: 'NOT_REGISTERED' }) gstRegistrationStatus: 'REGISTERED' | 'NOT_REGISTERED';
+  @Prop({ type: String, default: null }) gstin: string | null;
+  @Prop({ type: String, default: null }) registeredBusinessName: string | null;
+  @Prop({ type: String, default: null }) gstState: string | null;
+  @Prop({ type: String, default: 'INR' }) billingCurrency: string;
+  @Prop({ type: String, default: 'INV-' }) invoicePrefix: string;
+  @Prop({ type: String, enum: ['INCLUSIVE', 'EXCLUSIVE'], default: 'EXCLUSIVE' }) pricingTaxMode: 'INCLUSIVE' | 'EXCLUSIVE';
+  @Prop({ type: String, enum: ['NONE', 'GST_CONFIGURED'], default: 'NONE' }) taxConfigurationMode: 'NONE' | 'GST_CONFIGURED';
+  @Prop({ type: Number, default: null, min: 0, max: 100 }) defaultTaxPercent: number | null;
+  @Prop({ type: Boolean, default: false }) discountEnabled: boolean;
+  @Prop({ type: Boolean, default: false }) serviceChargeEnabled: boolean;
+  @Prop({ type: Number, default: null, min: 0, max: 100 }) serviceChargePercent: number | null;
+  @Prop({ type: String, default: null, maxlength: 500 }) receiptFooter: string | null;
+  @Prop({ type: String, default: null }) logoPublicId: string | null;
 }
 
 export type RestaurantDocument = HydratedDocument<Restaurant>;

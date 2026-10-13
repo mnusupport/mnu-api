@@ -168,7 +168,7 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 3001);
   await app.listen(port, '0.0.0.0');
-  new Logger('Bootstrap').log(`MnU API listening on port ${port} (${process.env.NODE_ENV ?? 'development'})`);
+  new Logger('Bootstrap').log(`Mr.wiserr API listening on port ${port} (${process.env.NODE_ENV ?? 'development'})`);
 }
 bootstrap().catch((error) => {
   // Startup failure (bad config, unreachable MongoDB, ...) must be visible in
@@ -176,6 +176,6 @@ bootstrap().catch((error) => {
   // Only the error name/message is logged; connection strings are not part of
   // the config errors thrown above.
   // eslint-disable-next-line no-console
-  console.error('MnU API failed to start:', error instanceof Error ? `${error.name}: ${error.message}` : 'unknown error');
+  console.error('Mr.wiserr API failed to start:', error instanceof Error ? `${error.name}: ${error.message}` : 'unknown error');
   process.exit(1);
 });

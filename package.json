@@ -8,7 +8,9 @@
     "start": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "db:seed": "ts-node src/database/seed.ts",
-    "db:bootstrap-super-admin": "ts-node src/database/bootstrap-super-admin.ts"
+    "db:bootstrap-super-admin": "ts-node src/database/bootstrap-super-admin.ts",
+    "test:billing-calculations": "tsc src/billing/billing.calculations.ts --target ES2020 --module commonjs --outDir ../scripts/billing-tests/compiled --strict && node --test ../scripts/billing-tests/billing-calculations.test.cjs",
+    "test:e2e-billing": "node --test ../scripts/billing-tests/order-billing.e2e.test.cjs"
   },
   "dependencies": {
     "@cloudinary/react": "^1.14.4",

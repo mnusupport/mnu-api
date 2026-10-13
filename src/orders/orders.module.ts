@@ -11,10 +11,13 @@ import { OrdersController, AnalyticsController, CustomersController } from './or
 import { PublicOrdersController } from './public-orders.controller';
 import { OrdersService } from './orders.service';
 import { CustomerRecognitionModule } from '../customers/customer-recognition.module';
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
   imports: [
     CustomerRecognitionModule,
+    // Marking an order READY issues its bill through the existing billing service (one billing implementation).
+    BillingModule,
     // DatabaseModule already registers these globally; re-listing them
     // here keeps this module's model dependencies explicit — same
     // convention TableSessionsModule/TablesModule already use.

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { RestaurantMember, RestaurantMemberDocument } from '../restaurant-members/schemas/restaurant-member.schema';
@@ -10,6 +10,7 @@ import { Customer, CustomerDocument } from '../customers/schemas/customer.schema
 import { Order, OrderDocument, OrderStatus, OrderType } from './schemas/order.schema';
 import { PaginationResult } from '../common/pagination';
 import { AuthorizationService } from '../common/authorization.service';
+import { BillingService, BillSummary } from '../billing/billing.service';
 
 // Day 22 (Part 5/6/15) — minimum total quantity ordered before an item
 // is allowed to appear in the customer-facing "Most ordered" section.
@@ -49,6 +50,7 @@ export class OrdersService {
     private readonly restaurantMemberModel: Model<RestaurantMemberDocument>,
     @InjectModel(Customer.name) private readonly customerModel: Model<CustomerDocument>,
     private readonly authorization: AuthorizationService,
+    private readonly billing: BillingService,
   ) {}
 
   // ---- Shared validation ----
@@ -382,8 +384,9 @@ export class OrdersService {
     return this.authorization.requireRestaurantAccess(restaurantId, userId);
   }
 
-  private serializeOrderSummary(order: OrderDocument, customer?: CustomerDocument | null) {
-    return {
+  // `extras` is passed only by the authenticated staff endpoints; public/customer responses never include billing data.
+  private serializeOrderSummary(order: OrderDocument, customer?: CustomerDocument | null, extras?: { bill?: BillSummary | null; billError?: string }) {
+    const summary = {
       id: order._id.toString(),
       orderNumber: order.orderNumber,
       tableNumber: order.tableNumber ?? null,
@@ -427,6 +430,8 @@ export class OrdersService {
           }
         : null,
     };
+    if (!extras) return summary;
+    return { ...summary, bill: extras.bill ?? null, ...(extras.billError ? { billError: extras.billError } : {}) };
   }
 
   // No RBAC role split beyond membership — every restaurant member
@@ -440,7 +445,8 @@ export class OrdersService {
     const customerIds = [...new Set(orders.map((o) => o.customerId?.toString()).filter(Boolean))] as string[];
     const customers = customerIds.length ? await this.customerModel.find({ _id: { $in: customerIds } }) : [];
     const customerById = new Map(customers.map((c) => [c._id.toString(), c]));
-    return orders.map((o) => this.serializeOrderSummary(o, o.customerId ? customerById.get(o.customerId.toString()) : null));
+    const bills = await this.billing.summariesForOrders(restaurantId, orders.map((o) => o._id));
+    return orders.map((o) => this.serializeOrderSummary(o, o.customerId ? customerById.get(o.customerId.toString()) : null, { bill: bills.get(o._id.toString()) ?? null }));
   }
 
   async getOrder(restaurantId: string, orderId: string, userId: string) {
@@ -455,7 +461,8 @@ export class OrdersService {
       throw new NotFoundException('Order not found.');
     }
     const customer = order.customerId ? await this.customerModel.findById(order.customerId) : null;
-    return this.serializeOrderSummary(order, customer);
+    const bills = await this.billing.summariesForOrders(restaurantId, [order._id]);
+    return this.serializeOrderSummary(order, customer, { bill: bills.get(order._id.toString()) ?? null });
   }
 
   // Part 2: dynamic order status, persisted to MongoDB. `status` is
@@ -476,10 +483,9 @@ export class OrdersService {
     }
 
     if (order.status === nextStatus) {
-      // No-op update (e.g. double-click) — return as-is rather than
-      // erroring, since the end state the caller wanted is already true.
-      const customer = order.customerId ? await this.customerModel.findById(order.customerId) : null;
-      return this.serializeOrderSummary(order, customer);
+      // No-op update (double-click, refresh, retry) — the end state the caller wanted is already true. For READY we
+      // also re-attempt a missing bill, so a retry heals an earlier "bill could not be generated" outcome.
+      return this.respondWithBilling(order, userId, restaurantId, nextStatus === OrderStatus.READY ? 'ensure' : 'read');
     }
 
     const allowed = STATUS_TRANSITIONS[order.status] ?? [];
@@ -487,11 +493,43 @@ export class OrdersService {
       throw new BadRequestException(`Cannot move an order from ${order.status} to ${nextStatus}.`);
     }
 
-    order.status = nextStatus;
-    await order.save();
+    // An order whose bill has been paid cannot be cancelled (no refund / credit-note flow exists yet).
+    if (nextStatus === OrderStatus.CANCELLED) await this.billing.assertOrderCancellable(restaurantId, orderId);
 
+    // Compare-and-set on the status we validated against. A plain `order.save()` here let two near-simultaneous
+    // requests (two staff devices, a double tap) both pass validation and the later write silently overwrite the
+    // earlier one — e.g. a CANCELLED order flipping back to READY.
+    const updated = await this.orderModel.findOneAndUpdate(
+      { _id: orderId, restaurantId, status: order.status },
+      { $set: { status: nextStatus } },
+      { new: true },
+    );
+    if (!updated) {
+      const current = await this.orderModel.findOne({ _id: orderId, restaurantId });
+      if (!current) throw new NotFoundException('Order not found.');
+      if (current.status === nextStatus) return this.respondWithBilling(current, userId, restaurantId, nextStatus === OrderStatus.READY ? 'ensure' : 'read');
+      throw new ConflictException(`This order was just changed to ${current.status} by someone else. Refresh and try again.`);
+    }
+
+    if (nextStatus === OrderStatus.READY) return this.respondWithBilling(updated, userId, restaurantId, 'ensure');
+    if (nextStatus === OrderStatus.CANCELLED) {
+      const outcome = await this.billing.voidForCancelledOrder(restaurantId, orderId, userId);
+      const response = await this.respondWithBilling(updated, userId, restaurantId, 'read');
+      return outcome.paidBillExists ? { ...response, billError: 'This order was cancelled while a payment was being recorded. Review the bill manually.' } : response;
+    }
+    return this.respondWithBilling(updated, userId, restaurantId, 'read');
+  }
+
+  // Serialises an order for staff, attaching its bill summary. `ensure` generates the bill if the order has none yet
+  // (used when an order is READY); `read` only reports what exists. Billing problems never fail the status change.
+  private async respondWithBilling(order: OrderDocument, userId: string, restaurantId: string, mode: 'ensure' | 'read') {
     const customer = order.customerId ? await this.customerModel.findById(order.customerId) : null;
-    return this.serializeOrderSummary(order, customer);
+    if (mode === 'ensure') {
+      const result = await this.billing.ensureBillOnReady(restaurantId, order._id.toString(), userId);
+      return this.serializeOrderSummary(order, customer, { bill: result.bill ?? null, billError: result.billError });
+    }
+    const bills = await this.billing.summariesForOrders(restaurantId, [order._id]);
+    return this.serializeOrderSummary(order, customer, { bill: bills.get(order._id.toString()) ?? null });
   }
 
   // ---- Admin: order notification + pending queue summary ----
@@ -520,7 +558,7 @@ export class OrdersService {
       OrderStatus.READY,
     ];
 
-    const [pendingCount, newOrders] = await Promise.all([
+    const [pendingCount, newOrders, pendingNewOrders] = await Promise.all([
       this.orderModel.countDocuments({
         restaurantId: restaurantObjectId,
         status: { $in: actionableStatuses },
@@ -531,10 +569,29 @@ export class OrdersService {
         .limit(100)
         .select({ _id: 1, orderNumber: 1, total: 1, items: 1, status: 1, createdAt: 1 })
         .lean(),
+      // Always return the current NEW queue as well as cursor-based arrivals.
+      // This lets a refreshed/reconnected dashboard resume alerts for orders
+      // that still require acceptance without replaying handled historical orders.
+      this.orderModel
+        .find({ restaurantId: restaurantObjectId, status: OrderStatus.NEW })
+        .sort({ createdAt: 1 })
+        .limit(100)
+        .select({ _id: 1, orderNumber: 1, total: 1, items: 1, status: 1, createdAt: 1 })
+        .lean(),
     ]);
+
+    const summarize = (order: any) => ({
+        id: order._id.toString(),
+        orderNumber: order.orderNumber,
+        total: order.total,
+        itemCount: order.items.reduce((sum: number, item: { quantity: number }) => sum + item.quantity, 0),
+        status: order.status,
+        createdAt: order.createdAt,
+      });
 
     return {
       pendingCount,
+      pendingNewOrders: pendingNewOrders.map(summarize),
       newOrders: newOrders.map((order) => ({
         id: order._id.toString(),
         orderNumber: order.orderNumber,

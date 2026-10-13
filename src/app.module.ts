@@ -14,6 +14,7 @@ import { AuthorizationModule } from './common/authorization.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { AuditModule } from './audit/audit.module';
 import { FeedbackModule } from './feedback/feedback.module';
+import { BillingModule } from './billing/billing.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { FeedbackModule } from './feedback/feedback.module';
     PlatformAdminModule,
     AuditModule,
     FeedbackModule,
+    BillingModule,
   ],
   controllers: [AppController],
 })
