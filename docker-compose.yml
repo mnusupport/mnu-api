@@ -1,0 +1,12 @@
+# Local development infrastructure only — not used in CI/production.
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mnu_mongo_data:/data/db
+
+volumes:
+  mnu_mongo_data:

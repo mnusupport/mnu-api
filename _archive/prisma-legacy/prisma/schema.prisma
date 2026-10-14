@@ -1,0 +1,68 @@
+// MnU — Prisma schema
+// Day 3 scope: foundation for users, roles, and restaurants ONLY.
+// Provider: MongoDB (switched from PostgreSQL). Mongo has no native
+// foreign keys, so relationMode = "prisma" tells Prisma to enforce
+// relations (including cascade deletes) itself at the query-engine level
+// instead of relying on the database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "mongodb"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
+}
+
+enum RestaurantRole {
+  SUPER_ADMIN
+  RESTAURANT_ADMIN
+  RESTAURANT_STAFF
+}
+
+/// A person who can sign in. Not tied to any single restaurant directly —
+/// that relationship (and the role within it) lives on RestaurantMember,
+/// since one user may belong to multiple restaurants.
+model User {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  name         String
+  email        String   @unique
+  passwordHash String   // placeholder column — real hashing arrives with the auth task
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships RestaurantMember[]
+}
+
+/// A restaurant tenant. Deliberately minimal — menu, QR, and analytics
+/// fields belong to later tasks, not this foundation.
+model Restaurant {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members RestaurantMember[]
+}
+
+/// The join between a User and a Restaurant, carrying that user's role
+/// *for that specific restaurant*. This is what allows one user to belong
+/// to zero, one, or many restaurants with a different role in each.
+model RestaurantMember {
+  id           String         @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String         @db.ObjectId
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurantId String         @db.ObjectId
+  restaurant   Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  role         RestaurantRole
+  createdAt    DateTime       @default(now())
+
+  // A user can only have one membership (one role) per restaurant.
+  @@unique([userId, restaurantId])
+  // Mongo doesn't auto-index foreign-key-style fields the way Postgres
+  // does — since relationMode="prisma" skips real FKs, these are added
+  // explicitly so lookups/cascades on them stay fast.
+  @@index([userId])
+  @@index([restaurantId])
+}
